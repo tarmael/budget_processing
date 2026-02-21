@@ -1,0 +1,675 @@
+import React, { useState, useEffect } from 'react';
+import {
+  Plus, Save, Upload, Trash2, Search, Filter, Edit2, Download,
+  ChevronRight, AlertCircle, CheckCircle2, X
+} from 'lucide-react';
+import { motion, AnimatePresence } from 'framer-motion';
+
+const API_BASE = import.meta.env.VITE_API_BASE || "/api";
+
+function App() {
+  const [categories, setCategories] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [search, setSearch] = useState("");
+  const [activeTab, setActiveTab] = useState("categories"); // 'categories' or 'process'
+  const [processedData, setProcessedData] = useState(null);
+  const [currentFile, setCurrentFile] = useState(null);
+  const [message, setMessage] = useState(null);
+  const [editingCatIndex, setEditingCatIndex] = useState(null);
+  const [newPattern, setNewPattern] = useState({ desc: '', title: '' });
+  const [isAddingCategory, setIsAddingCategory] = useState(false);
+  const [newCategoryName, setNewCategoryName] = useState("");
+  const [columnOrder, setColumnOrder] = useState(['Date', 'Description', 'Category', 'Title', 'Debit', 'Credit']);
+
+  // Edit Pattern State
+  const [editingPattern, setEditingPattern] = useState(null); // { catIdx, pIdx, desc, title }
+
+  // Assign Pattern State
+  const [assigningItem, setAssigningItem] = useState(null);
+  const [assignForm, setAssignForm] = useState({ desc: "", title: "", category: "" });
+
+  // Drag and Drop State
+  const [draggedItem, setDraggedItem] = useState(null); // { catName, pIdx }
+  const [dragOverCatName, setDragOverCatName] = useState(null);
+  const [draggedColumnIdx, setDraggedColumnIdx] = useState(null);
+
+  const handleDragStart = (e, catName, pIdx) => {
+    setDraggedItem({ catName, pIdx });
+    e.dataTransfer.setData("text/plain", JSON.stringify({ catName, pIdx }));
+    e.dataTransfer.effectAllowed = "move";
+  };
+
+  const handleDragOver = (e, catName) => {
+    e.preventDefault();
+    if (draggedItem && draggedItem.catName !== catName) {
+      setDragOverCatName(catName);
+    }
+  };
+
+  const handleDrop = (e, targetCatName) => {
+    e.preventDefault();
+    setDragOverCatName(null);
+    if (!draggedItem) return;
+
+    const sourceCatName = draggedItem.catName;
+    const pIdx = draggedItem.pIdx;
+
+    if (sourceCatName === targetCatName) return;
+
+    const newCats = [...categories];
+    const sourceIdx = newCats.findIndex(c => c.name === sourceCatName);
+    const targetIdx = newCats.findIndex(c => c.name === targetCatName);
+
+    if (sourceIdx !== -1 && targetIdx !== -1) {
+      const [movedPattern] = newCats[sourceIdx].patterns.splice(pIdx, 1);
+      newCats[targetIdx].patterns.push(movedPattern);
+      setCategories(newCats);
+      showMessage(`Moved to ${targetCatName}. Remember to Save Changes.`, "success");
+    }
+    setDraggedItem(null);
+  };
+
+  const handleColumnDragStart = (e, idx) => {
+    setDraggedColumnIdx(idx);
+    e.dataTransfer.effectAllowed = "move";
+  };
+
+  const handleColumnDragOver = (e, idx) => {
+    e.preventDefault();
+    if (draggedColumnIdx === null || draggedColumnIdx === idx) return;
+
+    const newOrder = [...columnOrder];
+    const item = newOrder.splice(draggedColumnIdx, 1)[0];
+    newOrder.splice(idx, 0, item);
+    setColumnOrder(newOrder);
+    setDraggedColumnIdx(idx);
+  };
+
+  useEffect(() => {
+    fetchCategories();
+    fetchConfig();
+  }, []);
+
+  const fetchConfig = async () => {
+    try {
+      const res = await fetch(`${API_BASE}/config`);
+      const data = await res.json();
+      if (data.column_order) setColumnOrder(data.column_order);
+    } catch (err) {
+      console.error("Failed to fetch config", err);
+    }
+  };
+
+  const fetchCategories = async () => {
+    try {
+      const res = await fetch(`${API_BASE}/categories`);
+      const data = await res.json();
+      setCategories(data.categories);
+      setLoading(false);
+    } catch (err) {
+      console.error("Failed to fetch categories", err);
+      setLoading(false);
+    }
+  };
+
+  const handleSave = async (silent = false) => {
+    try {
+      await Promise.all([
+        fetch(`${API_BASE}/categories`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ categories })
+        }),
+        fetch(`${API_BASE}/config`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ column_order: columnOrder })
+        })
+      ]);
+      if (!silent) showMessage("All changes saved successfully!", "success");
+    } catch (err) {
+      if (!silent) showMessage("Failed to save changes", "error");
+    }
+  };
+
+  const showMessage = (text, type) => {
+    setMessage({ text, type });
+    setTimeout(() => setMessage(null), 3000);
+  };
+
+  const handleAddCategory = () => {
+    if (newCategoryName.trim()) {
+      setCategories([...categories, { name: newCategoryName, patterns: [] }]);
+      setNewCategoryName("");
+      setIsAddingCategory(false);
+    }
+  };
+
+  const handleAddPattern = (catName) => {
+    if (newPattern.desc && newPattern.title) {
+      const newCats = [...categories];
+      const catIndex = newCats.findIndex(c => c.name === catName);
+      if (catIndex !== -1) {
+        newCats[catIndex].patterns.push({ [newPattern.desc]: newPattern.title });
+        setCategories(newCats);
+        setNewPattern({ desc: '', title: '' });
+        setEditingCatIndex(null);
+      }
+    }
+  };
+
+  const handleUpdatePattern = () => {
+    if (editingPattern && editingPattern.desc && editingPattern.title) {
+      const { catName, pIdx, desc, title } = editingPattern;
+      const newCats = [...categories];
+      const catIdx = newCats.findIndex(c => c.name === catName);
+      if (catIdx !== -1) {
+        newCats[catIdx].patterns[pIdx] = { [desc]: title };
+        setCategories(newCats);
+        setEditingPattern(null);
+      }
+    }
+  };
+
+  const removePattern = (catName, patternIndex) => {
+    const newCats = [...categories];
+    const catIndex = newCats.findIndex(c => c.name === catName);
+    if (catIndex !== -1) {
+      newCats[catIndex].patterns.splice(patternIndex, 1);
+      setCategories(newCats);
+    }
+  };
+
+  const runProcessing = async (fileToProcess) => {
+    const formData = new FormData();
+    formData.append('file', fileToProcess);
+
+    try {
+      const res = await fetch(`${API_BASE}/process`, {
+        method: 'POST',
+        body: formData
+      });
+      const data = await res.json();
+      setProcessedData(data);
+      setActiveTab("process");
+    } catch (err) {
+      showMessage("Processing failed", "error");
+    }
+  };
+
+  const handleFileUpload = async (e) => {
+    const selectedFile = e.target.files[0];
+    if (!selectedFile) return;
+    setCurrentFile(selectedFile);
+    await runProcessing(selectedFile);
+  };
+
+  const startAssignment = (item) => {
+    setAssigningItem(item);
+    setAssignForm({
+      desc: item.Description,
+      title: "",
+      category: categories[0]?.name || ""
+    });
+  };
+
+  const commitAssignment = async () => {
+    if (!assignForm.title || !assignForm.category) return;
+
+    const newCats = [...categories];
+    const catIdx = newCats.findIndex(c => c.name === assignForm.category);
+
+    if (catIdx !== -1) {
+      const updatedPattern = { [assignForm.desc]: assignForm.title };
+      newCats[catIdx].patterns.push(updatedPattern);
+
+      setCategories(newCats);
+      setAssigningItem(null);
+
+      // 1. Auto-save to backend
+      try {
+        const res = await fetch(`${API_BASE}/categories`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ categories: newCats })
+        });
+
+        if (res.ok && currentFile) {
+          showMessage("Pattern saved! Re-processing...", "success");
+          // 2. Auto-reprocess the current file
+          await runProcessing(currentFile);
+        }
+      } catch (err) {
+        showMessage("Failed to auto-save", "error");
+      }
+    }
+  };
+
+  const downloadCSV = () => {
+    if (!processedData || !processedData.results.length) return;
+
+    const headers = columnOrder;
+    const rows = processedData.results.map(row =>
+      headers.map(header => {
+        const val = row[header] || '';
+        // Escape quotes and wrap in quotes if contains comma
+        return typeof val === 'string' && (val.includes(',') || val.includes('"'))
+          ? `"${val.replace(/"/g, '""')}"`
+          : val;
+      }).join(',')
+    );
+
+    const csvContent = [headers.join(','), ...rows].join('\n');
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+
+    // Generate filename based on current date (e.g. 21-Feb-2026.processed.csv)
+    const now = new Date();
+    const day = String(now.getDate()).padStart(2, '0');
+    const month = now.toLocaleString('default', { month: 'short' });
+    const year = now.getFullYear();
+    const filename = `${day}-${month}-${year}.processed.csv`;
+
+    link.setAttribute("href", url);
+    link.setAttribute("download", filename);
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  };
+
+  const filteredCategories = (Array.isArray(categories) ? categories : []).filter(c =>
+    c && c.name && c.name.toLowerCase().includes(search.toLowerCase())
+  );
+
+  return (
+    <div className="app-container">
+      <header>
+        <motion.div
+          initial={{ opacity: 0, x: -20 }}
+          animate={{ opacity: 1, x: 0 }}
+        >
+          <h1>Budget Processing</h1>
+          <p style={{ color: 'var(--text-muted)' }}>Precision Bank Statement Pre-processing</p>
+        </motion.div>
+
+        <div style={{ display: 'flex', gap: '1rem' }}>
+          <button className={`btn ${activeTab === 'categories' ? 'btn-primary' : 'btn-ghost'}`} onClick={() => setActiveTab('categories')}>
+            Categories
+          </button>
+          <button className={`btn ${activeTab === 'process' ? 'btn-primary' : 'btn-ghost'}`} onClick={() => setActiveTab('process')}>
+            Process CSV
+          </button>
+          <button className="btn btn-primary" onClick={handleSave}>
+            <Save size={18} /> Save Changes
+          </button>
+        </div>
+      </header>
+
+      <AnimatePresence>
+        {isAddingCategory && (
+          <div className="modal-overlay" onClick={() => setIsAddingCategory(false)}>
+            <motion.div
+              className="glass-card"
+              onClick={e => e.stopPropagation()}
+              initial={{ scale: 0.9, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              exit={{ scale: 0.9, opacity: 0 }}
+              style={{ width: '400px' }}
+            >
+              <h2 style={{ marginBottom: '1.5rem' }}>New Category</h2>
+              <input
+                autoFocus
+                style={{ width: '100%', marginBottom: '1.5rem' }}
+                placeholder="Category Name (e.g. Subscriptions)"
+                value={newCategoryName}
+                onChange={e => setNewCategoryName(e.target.value)}
+                onKeyDown={e => e.key === 'Enter' && handleAddCategory()}
+              />
+              <div style={{ display: 'flex', gap: '1rem' }}>
+                <button className="btn btn-primary" style={{ flex: 1 }} onClick={handleAddCategory}>Create</button>
+                <button className="btn btn-ghost" style={{ flex: 1 }} onClick={() => setIsAddingCategory(false)}>Cancel</button>
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
+      <AnimatePresence mode="wait">
+        {message && (
+          <motion.div
+            initial={{ opacity: 0, y: -20 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0 }}
+            style={{
+              position: 'fixed', top: '2rem', right: '2rem', zIndex: 2000,
+              padding: '1rem 2rem', borderRadius: '1rem',
+              background: message.type === 'success' ? 'var(--success)' : 'var(--danger)',
+              display: 'flex', alignItems: 'center', gap: '0.5rem'
+            }}
+          >
+            {message.type === 'success' ? <CheckCircle2 size={20} /> : <AlertCircle size={20} />}
+            {message.text}
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      <main>
+        {activeTab === 'categories' ? (
+          <div>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '2rem', gap: '2rem' }}>
+              <div style={{ display: 'flex', gap: '1rem', alignItems: 'center', flex: 1 }}>
+                <div style={{ position: 'relative' }}>
+                  <Search style={{ position: 'absolute', left: '1rem', top: '50%', transform: 'translateY(-50%)', color: 'var(--text-muted)' }} size={18} />
+                  <input
+                    style={{ paddingLeft: '3rem', width: '250px' }}
+                    placeholder="Search categories..."
+                    value={search}
+                    onChange={(e) => setSearch(e.target.value)}
+                  />
+                </div>
+
+                <div className="column-reorder-container">
+                  <span style={{ fontSize: '0.8rem', color: 'var(--text-muted)', marginRight: '0.5rem' }}>Column Order:</span>
+                  {(Array.isArray(columnOrder) ? columnOrder : []).map((col, idx) => (
+                    <motion.div
+                      key={col}
+                      className="column-tag"
+                      draggable
+                      onDragStart={(e) => handleColumnDragStart(e, idx)}
+                      onDragOver={(e) => handleColumnDragOver(e, idx)}
+                      onDragEnd={() => setDraggedColumnIdx(null)}
+                      layout
+                    >
+                      {col}
+                    </motion.div>
+                  ))}
+                </div>
+              </div>
+
+              <button className="btn btn-primary" onClick={() => setIsAddingCategory(true)}>
+                <Plus size={18} /> New Category
+              </button>
+            </div>
+
+            <div className="category-grid">
+              {filteredCategories.map((cat, idx) => (
+                <motion.div
+                  key={cat.name}
+                  className={`glass-card category-card ${dragOverCatName === cat.name ? 'drag-over' : ''}`}
+                  layout
+                  initial={{ opacity: 0, scale: 0.9 }}
+                  animate={{ opacity: 1, scale: 1 }}
+                  onDragOver={(e) => handleDragOver(e, cat.name)}
+                  onDragLeave={() => setDragOverCatName(null)}
+                  onDrop={(e) => handleDrop(e, cat.name)}
+                >
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'start' }}>
+                    <h3>{cat.name}</h3>
+                    {cat.name === 'IGNORED' && <span className="badge badge-ignored">SYSTEM</span>}
+                  </div>
+
+                  <div style={{ marginBottom: '1.5rem', minHeight: '20px' }}>
+                    {cat.patterns.map((p, pIdx) => {
+                      const patternKey = Object.keys(p)[0];
+                      const patternValue = p[patternKey];
+                      const isEditing = editingPattern && editingPattern.catName === cat.name && editingPattern.pIdx === pIdx;
+
+                      if (isEditing) {
+                        return (
+                          <div key={pIdx} className="glass-card" style={{ padding: '1rem', background: 'rgba(255,255,255,0.05)', marginBottom: '0.5rem' }}>
+                            <input
+                              autoFocus
+                              style={{ width: '100%', marginBottom: '0.5rem' }}
+                              value={editingPattern.desc}
+                              onChange={e => setEditingPattern({ ...editingPattern, desc: e.target.value })}
+                            />
+                            <input
+                              style={{ width: '100%', marginBottom: '1rem' }}
+                              value={editingPattern.title}
+                              onChange={e => setEditingPattern({ ...editingPattern, title: e.target.value })}
+                              onKeyDown={e => e.key === 'Enter' && handleUpdatePattern()}
+                            />
+                            <div style={{ display: 'flex', gap: '0.5rem' }}>
+                              <button className="btn btn-primary" style={{ flex: 1, padding: '0.4rem' }} onClick={handleUpdatePattern}>Save</button>
+                              <button className="btn btn-ghost" style={{ flex: 1, padding: '0.4rem' }} onClick={() => setEditingPattern(null)}>Cancel</button>
+                            </div>
+                          </div>
+                        );
+                      }
+
+                      return (
+                        <div
+                          key={pIdx}
+                          className="pattern-item"
+                          style={{ cursor: 'grab' }}
+                          draggable="true"
+                          onDragStart={(e) => handleDragStart(e, cat.name, pIdx)}
+                          onDragEnd={() => setDraggedItem(null)}
+                        >
+                          <div style={{ overflow: 'hidden', textOverflow: 'ellipsis', flex: 1 }}>
+                            <span className="pattern-key">{patternKey}</span>
+                            <span style={{ margin: '0 0.5rem', color: 'var(--primary)' }}>→</span>
+                            <span className="pattern-value">{patternValue}</span>
+                          </div>
+                          <div style={{ display: 'flex', gap: '0.2rem' }}>
+                            <button
+                              className="btn-ghost"
+                              style={{ padding: '0.2rem', border: 'none', minWidth: '24px' }}
+                              onClick={() => setEditingPattern({ catName: cat.name, pIdx, desc: patternKey, title: patternValue })}
+                              title="Edit Pattern"
+                            >
+                              <Edit2 size={14} />
+                            </button>
+                            <button
+                              className="btn-ghost"
+                              style={{ padding: '0.2rem', border: 'none', minWidth: '24px' }}
+                              onClick={() => removePattern(cat.name, pIdx)}
+                              title="Delete Pattern"
+                            >
+                              <Trash2 size={14} />
+                            </button>
+                          </div>
+                        </div>
+                      );
+                    })}
+
+                    <AnimatePresence>
+                      {editingCatIndex === idx && (
+                        <motion.div
+                          initial={{ height: 0, opacity: 0 }}
+                          animate={{ height: 'auto', opacity: 1 }}
+                          exit={{ height: 0, opacity: 0 }}
+                          style={{ overflow: 'hidden', marginTop: '1rem' }}
+                        >
+                          <div className="glass-card" style={{ padding: '1rem', background: 'rgba(0,0,0,0.3)' }}>
+                            <input
+                              autoFocus
+                              placeholder="Bank Description"
+                              style={{ width: '100%', marginBottom: '0.5rem' }}
+                              value={newPattern.desc}
+                              onChange={e => setNewPattern({ ...newPattern, desc: e.target.value })}
+                            />
+                            <input
+                              placeholder="Display Title"
+                              style={{ width: '100%', marginBottom: '1rem' }}
+                              value={newPattern.title}
+                              onChange={e => setNewPattern({ ...newPattern, title: e.target.value })}
+                              onKeyDown={e => e.key === 'Enter' && handleAddPattern(cat.name)}
+                            />
+                            <div style={{ display: 'flex', gap: '0.5rem' }}>
+                              <button className="btn btn-primary" style={{ flex: 1, padding: '0.5rem' }} onClick={() => handleAddPattern(cat.name)}>Add</button>
+                              <button className="btn btn-ghost" style={{ flex: 1, padding: '0.5rem' }} onClick={() => setEditingCatIndex(null)}>Cancel</button>
+                            </div>
+                          </div>
+                        </motion.div>
+                      )}
+                    </AnimatePresence>
+                  </div>
+
+                  {editingCatIndex !== idx && (
+                    <button className="btn btn-ghost" style={{ width: '100%', fontSize: '0.8rem' }} onClick={() => setEditingCatIndex(idx)}>
+                      <Plus size={14} /> Add Pattern
+                    </button>
+                  )}
+                </motion.div>
+              ))}
+            </div>
+          </div>
+        ) : (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            className="glass-card"
+          >
+            {!processedData ? (
+              <div style={{ textAlign: 'center', padding: '4rem' }}>
+                <Upload size={48} style={{ color: 'var(--primary)', marginBottom: '1rem' }} />
+                <h2>Upload Bank Statement</h2>
+                <p style={{ color: 'var(--text-muted)', marginBottom: '2rem' }}>Drop your CSV file here to see the magic happen</p>
+                <input type="file" id="csv-upload" style={{ display: 'none' }} onChange={handleFileUpload} accept=".csv" />
+                <label htmlFor="csv-upload" className="btn btn-primary" style={{ margin: '0 auto', width: 'fit-content' }}>
+                  Choose File
+                </label>
+              </div>
+            ) : (
+              <div>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '2rem' }}>
+                  <h2>Processing Summary</h2>
+                  <div style={{ display: 'flex', gap: '1rem' }}>
+                    <button className="btn btn-primary" onClick={downloadCSV}>
+                      <Download size={18} /> Download {(() => {
+                        const now = new Date();
+                        return `${String(now.getDate()).padStart(2, '0')}-${now.toLocaleString('default', { month: 'short' })}-${now.getFullYear()}`;
+                      })()}.processed.csv
+                    </button>
+                    <button className="btn btn-ghost" onClick={() => setProcessedData(null)}>
+                      Upload New
+                    </button>
+                  </div>
+                </div>
+
+                {processedData.unmatched.length > 0 && (
+                  <div style={{ marginBottom: '3rem', padding: '1.5rem', border: '1px solid var(--danger)', borderRadius: '1rem', background: 'rgba(239, 68, 68, 0.05)' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', color: 'var(--danger)', marginBottom: '1rem' }}>
+                      <AlertCircle size={20} />
+                      <h3 style={{ margin: 0 }}>{processedData.unmatched.length} Unmatched Items</h3>
+                    </div>
+                    <div className="table-container">
+                      <table>
+                        <thead>
+                          <tr>
+                            <th>Date</th>
+                            <th>Description</th>
+                            <th>Amount</th>
+                            <th>Action</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {processedData.unmatched.map((row, i) => (
+                            <React.Fragment key={i}>
+                              <tr>
+                                <td>{row.Date}</td>
+                                <td style={{ fontFamily: 'monospace' }}>{row.Description}</td>
+                                <td>{row.Debit || row.Credit}</td>
+                                <td>
+                                  <button className="btn btn-ghost" style={{ fontSize: '0.8rem' }} onClick={() => startAssignment(row)}>
+                                    Assign Pattern
+                                  </button>
+                                </td>
+                              </tr>
+                              {assigningItem === row && (
+                                <tr>
+                                  <td colSpan="4" style={{ padding: '0' }}>
+                                    <motion.div
+                                      initial={{ height: 0, opacity: 0 }}
+                                      animate={{ height: 'auto', opacity: 1 }}
+                                      style={{ overflow: 'hidden', padding: '1.5rem', background: 'rgba(255,255,255,0.03)', borderBottom: '1px solid var(--border)' }}
+                                    >
+                                      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr auto', gap: '1rem', alignItems: 'end' }}>
+                                        <div>
+                                          <label style={{ display: 'block', fontSize: '0.7rem', color: 'var(--text-muted)', marginBottom: '0.3rem' }}>Pattern</label>
+                                          <input
+                                            style={{ width: '100%', fontSize: '0.8rem' }}
+                                            value={assignForm.desc}
+                                            onChange={e => setAssignForm({ ...assignForm, desc: e.target.value })}
+                                          />
+                                        </div>
+                                        <div>
+                                          <label style={{ display: 'block', fontSize: '0.7rem', color: 'var(--text-muted)', marginBottom: '0.3rem' }}>Title</label>
+                                          <input
+                                            style={{ width: '100%', fontSize: '0.8rem' }}
+                                            value={assignForm.title}
+                                            onChange={e => setAssignForm({ ...assignForm, title: e.target.value })}
+                                          />
+                                        </div>
+                                        <div>
+                                          <label style={{ display: 'block', fontSize: '0.7rem', color: 'var(--text-muted)', marginBottom: '0.3rem' }}>Category</label>
+                                          <select
+                                            style={{ width: '100%', fontSize: '0.8rem' }}
+                                            value={assignForm.category}
+                                            onChange={e => setAssignForm({ ...assignForm, category: e.target.value })}
+                                          >
+                                            {categories.map(c => <option key={c.name} value={c.name}>{c.name}</option>)}
+                                          </select>
+                                        </div>
+                                        <div style={{ display: 'flex', gap: '0.5rem' }}>
+                                          <button className="btn btn-primary" style={{ padding: '0.5rem 1rem', fontSize: '0.8rem' }} onClick={commitAssignment}>Save</button>
+                                          <button className="btn btn-ghost" style={{ padding: '0.5rem 1rem', fontSize: '0.8rem' }} onClick={() => setAssigningItem(null)}>Cancel</button>
+                                        </div>
+                                      </div>
+                                    </motion.div>
+                                  </td>
+                                </tr>
+                              )}
+                            </React.Fragment>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+                )}
+
+                <h3>Processed Results</h3>
+                <div className="table-container">
+                  <table>
+                    <thead>
+                      <tr>
+                        {columnOrder.map(col => <th key={col}>{col}</th>)}
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {processedData.results.map((row, i) => (
+                        <tr key={i}>
+                          {columnOrder.map(col => (
+                            <td key={col}>
+                              {col === 'Category' ? (
+                                <span className={`badge ${row.Title === 'UNMATCHED' ? 'badge-ignored' : 'badge-match'}`}>
+                                  {row.Category}
+                                </span>
+                              ) : col === 'Title' ? (
+                                <span style={{ fontWeight: 600 }}>{row.Title}</span>
+                              ) : col === 'Description' ? (
+                                <span style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>{row.Description}</span>
+                              ) : col === 'Debit' || col === 'Credit' ? (
+                                row[col]
+                              ) : (
+                                row[col]
+                              )}
+                            </td>
+                          ))}
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            )}
+          </motion.div>
+        )}
+      </main>
+    </div>
+  );
+}
+
+export default App;
