@@ -20,6 +20,7 @@ function App() {
   const [isAddingCategory, setIsAddingCategory] = useState(false);
   const [newCategoryName, setNewCategoryName] = useState("");
   const [columnOrder, setColumnOrder] = useState(['Date', 'Description', 'Category', 'Title', 'Debit', 'Credit']);
+  const [highlightedPattern, setHighlightedPattern] = useState(null);
 
   // Edit Pattern State
   const [editingPattern, setEditingPattern] = useState(null); // { catIdx, pIdx, desc, title }
@@ -27,6 +28,8 @@ function App() {
   // Assign Pattern State
   const [assigningItem, setAssigningItem] = useState(null);
   const [assignForm, setAssignForm] = useState({ desc: "", title: "", category: "" });
+  const [quickEditItem, setQuickEditItem] = useState(null);
+  const [quickEditForm, setQuickEditForm] = useState({ pattern: "", title: "", category: "" });
 
   // Drag and Drop State
   const [draggedItem, setDraggedItem] = useState(null); // { catName, pIdx }
@@ -241,6 +244,49 @@ function App() {
         }
       } catch (err) {
         showMessage("Failed to auto-save", "error");
+      }
+    }
+  };
+
+  const startQuickEdit = (item) => {
+    setQuickEditItem(item);
+    setQuickEditForm({
+      pattern: item.Pattern,
+      title: item.Title,
+      category: item.Category
+    });
+  };
+
+  const commitQuickEdit = async () => {
+    if (!quickEditForm.pattern || !quickEditForm.title) return;
+
+    const newCats = [...categories];
+    const catIdx = newCats.findIndex(c => c.name === quickEditForm.category);
+
+    if (catIdx !== -1) {
+      const oldPatternKey = quickEditItem.Pattern;
+      const patterns = newCats[catIdx].patterns;
+      const pIdx = patterns.findIndex(p => Object.keys(p)[0] === oldPatternKey);
+
+      if (pIdx !== -1) {
+        newCats[catIdx].patterns[pIdx] = { [quickEditForm.pattern]: quickEditForm.title };
+        setCategories(newCats);
+        setQuickEditItem(null);
+
+        try {
+          const res = await fetch(`${API_BASE}/categories`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ categories: newCats })
+          });
+
+          if (res.ok && currentFile) {
+            showMessage("Pattern adjusted! Re-processing...", "success");
+            await runProcessing(currentFile);
+          }
+        } catch (err) {
+          showMessage("Failed to auto-save", "error");
+        }
       }
     }
   };
@@ -635,34 +681,116 @@ function App() {
                   <table>
                     <thead>
                       <tr>
-                        {columnOrder.map(col => <th key={col}>{col}</th>)}
+                        {(Array.isArray(columnOrder) ? columnOrder : []).map(col => <th key={col}>{col}</th>)}
+                        <th>Action</th>
                       </tr>
                     </thead>
                     <tbody>
-                      {processedData.results.map((row, i) => (
-                        <tr key={i}>
-                          {columnOrder.map(col => (
-                            <td key={col}>
-                              {col === 'Category' ? (
-                                <span className={`badge ${row.Title === 'UNMATCHED' ? 'badge-ignored' : 'badge-match'}`}>
-                                  {row.Category}
-                                </span>
-                              ) : col === 'Title' ? (
-                                <span style={{ fontWeight: 600 }}>{row.Title}</span>
-                              ) : col === 'Description' ? (
-                                <span style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>{row.Description}</span>
-                              ) : col === 'Debit' || col === 'Credit' ? (
-                                row[col]
-                              ) : (
-                                row[col]
-                              )}
-                            </td>
-                          ))}
-                        </tr>
-                      ))}
+                      {processedData.results.map((row, i) => {
+                        const isHighlighted = highlightedPattern && row.Pattern === highlightedPattern;
+                        return (
+                          <React.Fragment key={i}>
+                            <tr
+                              onClick={() => row.Pattern && setHighlightedPattern(row.Pattern === highlightedPattern ? null : row.Pattern)}
+                              style={{
+                                cursor: row.Pattern ? 'pointer' : 'default',
+                                background: isHighlighted ? 'rgba(129, 140, 248, 0.2)' : 'transparent',
+                                borderLeft: isHighlighted ? '4px solid var(--primary)' : 'none',
+                                transition: 'all 0.2s ease'
+                              }}
+                              title={row.Pattern ? `Pattern: ${row.Pattern}` : ''}
+                            >
+                              {(Array.isArray(columnOrder) ? columnOrder : []).map(col => (
+                                <td key={col}>
+                                  {col === 'Category' ? (
+                                    <span className={`badge ${row.Title === 'UNMATCHED' ? 'badge-ignored' : 'badge-match'}`}>
+                                      {row.Category}
+                                    </span>
+                                  ) : col === 'Title' ? (
+                                    <span style={{ fontWeight: 600 }}>{row.Title}</span>
+                                  ) : col === 'Description' ? (
+                                    <span style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>{row.Description}</span>
+                                  ) : col === 'Debit' || col === 'Credit' ? (
+                                    row[col]
+                                  ) : (
+                                    row[col]
+                                  )}
+                                </td>
+                              ))}
+                              <td>
+                                {row.Pattern && (
+                                  <button
+                                    className="btn-ghost"
+                                    style={{ padding: '0.2rem', border: 'none', minWidth: '24px' }}
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      startQuickEdit(row);
+                                    }}
+                                    title="Adjust Pattern"
+                                  >
+                                    <Edit2 size={14} />
+                                  </button>
+                                )}
+                              </td>
+                            </tr>
+                            {quickEditItem === row && (
+                              <tr key={`edit-${i}`}>
+                                <td colSpan={columnOrder.length + 1} style={{ padding: '0' }}>
+                                  <motion.div
+                                    initial={{ height: 0, opacity: 0 }}
+                                    animate={{ height: 'auto', opacity: 1 }}
+                                    style={{ overflow: 'hidden', padding: '1.5rem', background: 'rgba(255,255,255,0.03)', borderBottom: '1px solid var(--border)' }}
+                                  >
+                                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr auto', gap: '1rem', alignItems: 'end' }}>
+                                      <div>
+                                        <label style={{ display: 'block', fontSize: '0.7rem', color: 'var(--text-muted)', marginBottom: '0.3rem' }}>Pattern</label>
+                                        <input
+                                          style={{ width: '100%', fontSize: '0.8rem' }}
+                                          value={quickEditForm.pattern}
+                                          onChange={e => setQuickEditForm({ ...quickEditForm, pattern: e.target.value })}
+                                        />
+                                      </div>
+                                      <div>
+                                        <label style={{ display: 'block', fontSize: '0.7rem', color: 'var(--text-muted)', marginBottom: '0.3rem' }}>Title</label>
+                                        <input
+                                          style={{ width: '100%', fontSize: '0.8rem' }}
+                                          value={quickEditForm.title}
+                                          onChange={e => setQuickEditForm({ ...quickEditForm, title: e.target.value })}
+                                        />
+                                      </div>
+                                      <div>
+                                        <label style={{ display: 'block', fontSize: '0.7rem', color: 'var(--text-muted)', marginBottom: '0.3rem' }}>Category</label>
+                                        <select
+                                          style={{ width: '100%', fontSize: '0.8rem' }}
+                                          value={quickEditForm.category}
+                                          onChange={e => setQuickEditForm({ ...quickEditForm, category: e.target.value })}
+                                        >
+                                          {categories.map(c => <option key={c.name} value={c.name}>{c.name}</option>)}
+                                        </select>
+                                      </div>
+                                      <div style={{ display: 'flex', gap: '0.5rem' }}>
+                                        <button className="btn btn-primary" style={{ padding: '0.5rem 1rem', fontSize: '0.8rem' }} onClick={commitQuickEdit}>Update</button>
+                                        <button className="btn btn-ghost" style={{ padding: '0.5rem 1rem', fontSize: '0.8rem' }} onClick={() => setQuickEditItem(null)}>Cancel</button>
+                                      </div>
+                                    </div>
+                                  </motion.div>
+                                </td>
+                              </tr>
+                            )}
+                          </React.Fragment>
+                        );
+                      })}
                     </tbody>
                   </table>
                 </div>
+
+                {highlightedPattern && (
+                  <div style={{ marginTop: '1rem', display: 'flex', justifyContent: 'center' }}>
+                    <button className="btn btn-ghost" onClick={() => setHighlightedPattern(null)}>
+                      <X size={14} /> Clear Highlight ({highlightedPattern})
+                    </button>
+                  </div>
+                )}
               </div>
             )}
           </motion.div>

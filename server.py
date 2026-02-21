@@ -8,6 +8,10 @@ from typing import List, Dict, Any
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
 import process # Import our logic from process.py
+from dotenv import load_dotenv
+
+# Load local environment variables if .env exists
+load_dotenv()
 
 app = FastAPI()
 
@@ -65,20 +69,10 @@ async def process_statement(file: UploadFile = File(...)):
         shutil.copyfileobj(file.file, buffer)
     
     output_csv = temp_input.replace(".csv", ".processed.csv")
+    no_cat_path = temp_input.replace(".csv", ".NO_CATEGORY.csv")
     
     try:
-        process.process_csv(temp_input, output_csv, CATEGORIES_FILE, CONFIG_FILE)
-        
-        # Read processed data to return to UI
-        df = pd.read_csv(output_csv).fillna("")
-        results = df.to_dict(orient="records")
-        
-        # Also check for NO_CATEGORY items
-        no_cat_path = temp_input.replace('.csv', '.NO_CATEGORY.csv')
-        unmatched = []
-        if os.path.exists(no_cat_path):
-            unmatched_df = pd.read_csv(no_cat_path).fillna("")
-            unmatched = unmatched_df.to_dict(orient="records")
+        results, unmatched = process.process_csv(temp_input, output_csv, CATEGORIES_FILE, CONFIG_FILE)
             
         return {
             "results": results,

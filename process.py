@@ -30,7 +30,8 @@ def get_best_match(description, categories_data, threshold=80):
                     highest_score = score
                     best_match = {
                         'Category': category_name,
-                        'Title': title
+                        'Title': title,
+                        'Pattern': pattern_str
                     }
     
     return best_match
@@ -64,12 +65,14 @@ def process_csv(input_path, output_path, categories_path, config_path=None):
                 'Debit': row['Debit'],
                 'Credit': row['Credit'],
                 'Category': '',
-                'Title': ''
+                'Title': '',
+                'Pattern': ''
             }
             
             if match:
                 new_row['Category'] = match['Category']
                 new_row['Title'] = match['Title']
+                new_row['Pattern'] = match['Pattern']
                 processed_rows.append(new_row)
             else:
                 new_row['Category'] = description 
@@ -92,7 +95,7 @@ def process_csv(input_path, output_path, categories_path, config_path=None):
     
     # Write processed.csv
     with open(output_path, 'w', newline='') as csvfile:
-        writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
+        writer = csv.DictWriter(csvfile, fieldnames=fieldnames, extrasaction='ignore')
         writer.writeheader()
         writer.writerows(processed_rows)
         
@@ -100,9 +103,11 @@ def process_csv(input_path, output_path, categories_path, config_path=None):
     if no_category_rows:
         no_cat_path = input_path.replace('.csv', '.NO_CATEGORY.csv')
         with open(no_cat_path, 'w', newline='') as csvfile:
-            writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
+            writer = csv.DictWriter(csvfile, fieldnames=fieldnames, extrasaction='ignore')
             writer.writeheader()
             writer.writerows(no_category_rows)
+
+    return processed_rows, no_category_rows
 
 if __name__ == "__main__":
     if len(sys.argv) < 2:
