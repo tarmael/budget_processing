@@ -85,10 +85,9 @@ def process_csv(input_paths, output_base, categories_path, config_path=None):
                 
                 all_raw_rows.append(new_row)
 
-    # 1. Deduplicate identical rows (handles overlapping CSV file uploads)
     duplicates = []
     
-    # 2. Match Internal Transfers (Debit matches Credit on same Date/Amount)
+    # Match Internal Transfers (Debit matches Credit on same Date/Amount)
     # Only if both are in the 'Transfers' category
     final_rows = []
     transfer_credits = {} # (Date, Amount) -> list of rows
