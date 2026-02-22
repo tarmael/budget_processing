@@ -13,11 +13,9 @@ def get_best_match(description, categories_data, threshold=80):
     best_match = None
     highest_score = 0
     
-    # "IGNORED" category logic: 
-    # GEMINI.md says: "In categories.json there will be a category called IGNORED, 
-    # which will be used to store lines that could not be matched to a category within the output CSV files."
-    # And "another CSV file will also be created suffixed with NO_CATEGORY.csv, 
-    # which will contain all lines that could not be matched to a category."
+    # "Transfers" category logic: 
+    # The "IGNORED" category was renamed to "Transfers" in categories.json.
+    # If a line cannot be fuzzy matched, it will be added to .NO_CATEGORY.csv.
     
     for cat_obj in categories_data['categories']:
         category_name = cat_obj['name']
@@ -46,7 +44,7 @@ def process_csv(input_paths, output_base, categories_path, config_path=None):
     configs = {
         'debit': ['Date', 'Description', 'Category', 'Title', 'Debit'],
         'credit': ['Date', 'Description', 'Category', 'Title', 'Credit'],
-        'ignored': ['Date', 'Description', 'Category', 'Title', 'Debit', 'Credit']
+        'duplicates': ['Date', 'Description', 'Category', 'Title', 'Debit', 'Credit']
     }
     
     if config_path and os.path.exists(config_path):
@@ -55,23 +53,23 @@ def process_csv(input_paths, output_base, categories_path, config_path=None):
                 config = json.load(f)
                 if 'debit_columns' in config: configs['debit'] = config['debit_columns']
                 if 'credit_columns' in config: configs['credit'] = config['credit_columns']
-                if 'ignored_columns' in config: configs['ignored'] = config['ignored_columns']
+                if 'duplicates_columns' in config: configs['duplicates'] = config['duplicates_columns']
         except Exception:
             pass
-            
+
     all_raw_rows = []
     for path in input_paths:
         with open(path, 'r', newline='') as csvfile:
             reader = csv.DictReader(csvfile)
             for row in reader:
-                description = row.get('Description', '')
+                description = str(row.get('Description', '') or '').strip()
                 match = get_best_match(description, categories_data)
                 
                 new_row = {
-                    'Date': row.get('Date', ''),
+                    'Date': str(row.get('Date', '') or '').strip(),
                     'Description': description,
-                    'Debit': row.get('Debit', ''),
-                    'Credit': row.get('Credit', ''),
+                    'Debit': str(row.get('Debit', '') or '').strip(),
+                    'Credit': str(row.get('Credit', '') or '').strip(),
                     'Category': '',
                     'Title': '',
                     'Pattern': ''
@@ -87,6 +85,45 @@ def process_csv(input_paths, output_base, categories_path, config_path=None):
                 
                 all_raw_rows.append(new_row)
 
+    # 1. Deduplicate identical rows (handles overlapping CSV file uploads)
+    duplicates = []
+    
+    # 2. Match Internal Transfers (Debit matches Credit on same Date/Amount)
+    # Only if both are in the 'Transfers' category
+    final_rows = []
+    transfer_credits = {} # (Date, Amount) -> list of rows
+    
+    # First pass: identify all potential transfer credits
+    remaining_after_dedup = []
+    for row in all_raw_rows:
+        if row['Category'] == 'Transfers' and row['Credit'] and str(row['Credit']).strip():
+            key = (row['Date'], str(row['Credit']).strip())
+            transfer_credits.setdefault(key, []).append(row)
+        else:
+            remaining_after_dedup.append(row)
+            
+    # Second pass: check debits against credit pool
+    for row in remaining_after_dedup:
+        if row['Category'] == 'Transfers' and row['Debit'] and str(row['Debit']).strip():
+            key = (row['Date'], str(row['Debit']).strip())
+            if key in transfer_credits and transfer_credits[key]:
+                # Found a match! Move both to duplicates
+                match_credit = transfer_credits[key].pop(0)
+                duplicates.append(row)
+                duplicates.append(match_credit)
+            else:
+                # No match found, keep as a regular transaction
+                final_rows.append(row)
+        else:
+            # Not a transfer or not a debit, keep it
+            final_rows.append(row)
+            
+    # Add back any unmatched credits from the pool
+    for pool in transfer_credits.values():
+        final_rows.extend(pool)
+        
+    all_raw_rows = final_rows
+
     def parse_date(date_str):
         d_clean = " ".join(date_str.split())
         formats = ('%d/%m/%Y', '%Y-%m-%d', '%d-%m-%Y', '%d %b %Y', '%d %b %y', '%Y/%m/%d')
@@ -101,37 +138,16 @@ def process_csv(input_paths, output_base, categories_path, config_path=None):
     all_raw_rows.sort(key=lambda x: parse_date(x['Date']))
 
     # Split into Debits and Credits
-    debits = [r for r in all_raw_rows if r['Debit'] and r['Debit'].strip()]
-    credits = [r for r in all_raw_rows if r['Credit'] and r['Credit'].strip()]
-    
-    ignored_rows = []
-    
-    # Matching logic for internal transfers
-    # Key is (DateString, AmountString)
-    credit_pool = {}
-    for r in credits:
-        key = (r['Date'], r['Credit'])
-        credit_pool.setdefault(key, []).append(r)
-        
-    final_debits = []
-    for d in debits:
-        key = (d['Date'], d['Debit'])
-        if key in credit_pool and credit_pool[key]:
-            match_credit = credit_pool[key].pop(0)
-            ignored_rows.append(d)
-            ignored_rows.append(match_credit)
-        else:
-            final_debits.append(d)
-            
-    final_credits = [r for rows in credit_pool.values() for r in rows]
-    
-    # Sort again for output files
+    final_debits = [r for r in all_raw_rows if r.get('Debit') and str(r['Debit']).strip()]
+    final_credits = [r for r in all_raw_rows if r.get('Credit') and str(r['Credit']).strip()]
+
+    # Sort for output files
     final_debits.sort(key=lambda x: parse_date(x['Date']))
     final_credits.sort(key=lambda x: parse_date(x['Date']))
-    ignored_rows.sort(key=lambda x: parse_date(x['Date']))
 
     # Write files
     def write_safe(path, rows, fields):
+        if not rows: return
         with open(path, 'w', newline='') as f:
             writer = csv.DictWriter(f, fieldnames=fields, extrasaction='ignore')
             writer.writeheader()
@@ -139,12 +155,17 @@ def process_csv(input_paths, output_base, categories_path, config_path=None):
 
     write_safe(output_base + '.debit.csv', final_debits, configs['debit'])
     write_safe(output_base + '.credit.csv', final_credits, configs['credit'])
-    write_safe(output_base + '.ignored.csv', ignored_rows, configs['ignored'])
+    write_safe(output_base + '.duplicates.csv', duplicates, configs['duplicates'])
+    
+    unmatched = [r for r in all_raw_rows if r['Title'] == 'UNMATCHED']
+    if unmatched:
+        # Use debit or credit columns depending on what's available for the row, 
+        # but for NO_CATEGORY.csv we might want both or a standard set.
+        # GEMINI.md says: Date, Description, Category, Title, Debit, Credit
+        no_cat_fields = ['Date', 'Description', 'Category', 'Title', 'Debit', 'Credit']
+        write_safe(output_base + '.NO_CATEGORY.csv', unmatched, no_cat_fields)
 
-    unmatched = [r for r in (final_debits + final_credits) if r['Title'] == 'UNMATCHED']
-    combined_results = final_debits + final_credits # UI normally wants categorized items
-
-    return combined_results, unmatched, ignored_rows
+    return all_raw_rows, unmatched, duplicates
 
 if __name__ == "__main__":
     if len(sys.argv) < 2:

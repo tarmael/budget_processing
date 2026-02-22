@@ -22,7 +22,7 @@ function App() {
   const [columnOrders, setColumnOrders] = useState({
     debit: ['Date', 'Description', 'Category', 'Title', 'Debit'],
     credit: ['Date', 'Description', 'Category', 'Title', 'Credit'],
-    ignored: ['Date', 'Description', 'Category', 'Title', 'Debit', 'Credit']
+    duplicates: ['Date', 'Description', 'Category', 'Title', 'Debit', 'Credit']
   });
   const [highlightedPattern, setHighlightedPattern] = useState(null);
 
@@ -107,7 +107,7 @@ function App() {
       if (data.debit_columns) setColumnOrders({
         debit: data.debit_columns,
         credit: data.credit_columns,
-        ignored: data.ignored_columns
+        duplicates: data.duplicates_columns || data.ignored_columns // Handle backward compatibility if any
       });
     } catch (err) {
       console.error("Failed to fetch config", err);
@@ -140,7 +140,7 @@ function App() {
           body: JSON.stringify({
             debit_columns: columnOrders.debit,
             credit_columns: columnOrders.credit,
-            ignored_columns: columnOrders.ignored
+            duplicates_columns: columnOrders.duplicates
           })
         })
       ]);
@@ -210,11 +210,23 @@ function App() {
         method: 'POST',
         body: formData
       });
+
       const data = await res.json();
-      setProcessedData(data);
+
+      if (!res.ok) {
+        throw new Error(data?.detail || "Processing failed");
+      }
+
+      setProcessedData({
+        results: Array.isArray(data?.results) ? data.results : [],
+        unmatched: Array.isArray(data?.unmatched) ? data.unmatched : [],
+        duplicates: Array.isArray(data?.duplicates) ? data.duplicates : []
+      });
       setActiveTab("process");
     } catch (err) {
-      showMessage("Processing failed", "error");
+      console.error(err);
+      showMessage(err.message || "Processing failed", "error");
+      setProcessedData(null);
     }
   };
 
@@ -312,11 +324,11 @@ function App() {
   const downloadCSV = (type) => {
     if (!processedData) return;
 
-    const headers = columnOrders[type];
+    const headers = columnOrders?.[type] || [];
     let data = [];
-    if (type === 'debit') data = processedData.results.filter(r => r.Debit && r.Debit.trim());
-    else if (type === 'credit') data = processedData.results.filter(r => r.Credit && r.Credit.trim());
-    else if (type === 'ignored') data = processedData.ignored;
+    if (type === 'debit') data = (processedData?.results || []).filter(r => r?.Debit && String(r.Debit).trim());
+    else if (type === 'credit') data = (processedData?.results || []).filter(r => r?.Credit && String(r.Credit).trim());
+    else if (type === 'duplicates') data = processedData?.duplicates || [];
 
     if (!data.length) {
       showMessage(`No ${type} entries to download`, "error");
@@ -440,7 +452,7 @@ function App() {
                 </div>
 
                 <div style={{ display: 'flex', flexWrap: 'wrap', gap: '2rem', marginTop: '1rem' }}>
-                  {['debit', 'credit', 'ignored'].map(type => (
+                  {['debit', 'credit', 'duplicates'].map(type => (
                     <div key={type} className="column-reorder-container" style={{ flex: '1 1 300px' }}>
                       <span style={{ fontSize: '0.7rem', color: 'var(--text-muted)', display: 'block', marginBottom: '0.5rem', textTransform: 'uppercase' }}>{type} Columns:</span>
                       <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.5rem' }}>
@@ -482,7 +494,7 @@ function App() {
                 >
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'start' }}>
                     <h3>{cat.name}</h3>
-                    {cat.name === 'IGNORED' && <span className="badge badge-ignored">SYSTEM</span>}
+                    {cat.name === 'Transfers' && <span className="badge badge-ignored">SYSTEM</span>}
                   </div>
 
                   <div style={{ marginBottom: '1.5rem', minHeight: '20px' }}>
@@ -619,8 +631,8 @@ function App() {
                     <button className="btn btn-primary" style={{ fontSize: '0.8rem' }} onClick={() => downloadCSV('credit')}>
                       <Download size={14} /> Credits
                     </button>
-                    <button className="btn btn-primary" style={{ fontSize: '0.8rem', background: 'var(--text-muted)' }} onClick={() => downloadCSV('ignored')}>
-                      <Download size={14} /> Ignored
+                    <button className="btn btn-primary" style={{ fontSize: '0.8rem', background: 'var(--text-muted)' }} onClick={() => downloadCSV('duplicates')}>
+                      <Download size={14} /> Duplicates
                     </button>
                     <button className="btn btn-ghost" style={{ fontSize: '0.8rem' }} onClick={() => setProcessedData(null)}>
                       Clear
@@ -628,11 +640,11 @@ function App() {
                   </div>
                 </div>
 
-                {processedData.unmatched.length > 0 && (
+                {processedData?.unmatched?.length > 0 && (
                   <div style={{ marginBottom: '3rem', padding: '1.5rem', border: '1px solid var(--danger)', borderRadius: '1rem', background: 'rgba(239, 68, 68, 0.05)' }}>
                     <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', color: 'var(--danger)', marginBottom: '1rem' }}>
                       <AlertCircle size={20} />
-                      <h3 style={{ margin: 0 }}>{processedData.unmatched.length} Unmatched Items</h3>
+                      <h3 style={{ margin: 0 }}>{processedData?.unmatched?.length || 0} Unmatched Items</h3>
                     </div>
                     <div className="table-container">
                       <table>
@@ -645,7 +657,7 @@ function App() {
                           </tr>
                         </thead>
                         <tbody>
-                          {processedData.unmatched.map((row, i) => (
+                          {(processedData?.unmatched || []).map((row, i) => (
                             <React.Fragment key={i}>
                               <tr>
                                 <td>{row.Date}</td>
@@ -719,7 +731,7 @@ function App() {
                       </tr>
                     </thead>
                     <tbody>
-                      {processedData.results.map((row, i) => {
+                      {(processedData?.results || []).map((row, i) => {
                         const isHighlighted = highlightedPattern && row.Pattern === highlightedPattern;
                         return (
                           <React.Fragment key={i}>
@@ -810,29 +822,33 @@ function App() {
                   </table>
                 </div>
 
-                <h3 style={{ marginTop: '3rem' }}>Ignored (Internal Transfers)</h3>
-                <div className="table-container">
-                  <table>
-                    <thead>
-                      <tr>
-                        <th>Date</th>
-                        <th>Description</th>
-                        <th>Debit</th>
-                        <th>Credit</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {processedData.ignored.map((row, i) => (
-                        <tr key={i}>
-                          <td>{row.Date}</td>
-                          <td style={{ fontSize: '0.8rem' }}>{row.Description}</td>
-                          <td>{row.Debit}</td>
-                          <td>{row.Credit}</td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
+                {processedData?.duplicates?.length > 0 && (
+                  <>
+                    <h3 style={{ marginTop: '3rem' }}>Duplicates (Removed)</h3>
+                    <div className="table-container">
+                      <table>
+                        <thead>
+                          <tr>
+                            <th>Date</th>
+                            <th>Description</th>
+                            <th>Debit</th>
+                            <th>Credit</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {processedData.duplicates.map((row, i) => (
+                            <tr key={i}>
+                              <td>{row.Date}</td>
+                              <td style={{ fontSize: '0.8rem' }}>{row.Description}</td>
+                              <td>{row.Debit}</td>
+                              <td>{row.Credit}</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  </>
+                )}
 
                 {highlightedPattern && (
                   <div style={{ marginTop: '1rem', display: 'flex', justifyContent: 'center' }}>
