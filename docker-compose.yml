@@ -1,9 +1,10 @@
 services:
   budget-processor:
     build: .
+    image: localhost/budget-processor:latest
     container_name: budget-processor
     ports:
-      - "8000:8000"
+      - "8001:8000"
     volumes:
       # Mount your local files into the container
       - ./categories.json:/app/input/categories.json

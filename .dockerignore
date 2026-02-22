@@ -1,7 +1,6 @@
 node_modules
 .venv
 .git
-.env
 dist
 frontend/dist
 frontend/node_modules

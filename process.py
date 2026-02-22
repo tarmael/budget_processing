@@ -36,52 +36,58 @@ def get_best_match(description, categories_data, threshold=80):
     
     return best_match
 
-def process_csv(input_path, output_path, categories_path, config_path=None):
+def process_csv(input_paths, output_base, categories_path, config_path=None):
+    if isinstance(input_paths, str):
+        input_paths = [input_paths]
+        
     categories_data = load_categories(categories_path)
     
-    # Load config for column order
-    fieldnames = ['Date', 'Description', 'Category', 'Title', 'Debit', 'Credit']
+    # Load config for column orders
+    configs = {
+        'debit': ['Date', 'Description', 'Category', 'Title', 'Debit'],
+        'credit': ['Date', 'Description', 'Category', 'Title', 'Credit'],
+        'ignored': ['Date', 'Description', 'Category', 'Title', 'Debit', 'Credit']
+    }
+    
     if config_path and os.path.exists(config_path):
         try:
             with open(config_path, 'r') as f:
                 config = json.load(f)
-                if 'column_order' in config:
-                    fieldnames = config['column_order']
+                if 'debit_columns' in config: configs['debit'] = config['debit_columns']
+                if 'credit_columns' in config: configs['credit'] = config['credit_columns']
+                if 'ignored_columns' in config: configs['ignored'] = config['ignored_columns']
         except Exception:
-            pass # Fallback to default fieldnames
-    
-    processed_rows = []
-    no_category_rows = []
-    
-    with open(input_path, 'r', newline='') as csvfile:
-        reader = csv.DictReader(csvfile)
-        for row in reader:
-            description = row['Description']
-            match = get_best_match(description, categories_data)
+            pass
             
-            new_row = {
-                'Date': row['Date'],
-                'Description': row['Description'],
-                'Debit': row['Debit'],
-                'Credit': row['Credit'],
-                'Category': '',
-                'Title': '',
-                'Pattern': ''
-            }
-            
-            if match:
-                new_row['Category'] = match['Category']
-                new_row['Title'] = match['Title']
-                new_row['Pattern'] = match['Pattern']
-                processed_rows.append(new_row)
-            else:
-                new_row['Category'] = description 
-                new_row['Title'] = 'UNMATCHED'
-                no_category_rows.append(new_row)
-                processed_rows.append(new_row)
+    all_raw_rows = []
+    for path in input_paths:
+        with open(path, 'r', newline='') as csvfile:
+            reader = csv.DictReader(csvfile)
+            for row in reader:
+                description = row.get('Description', '')
+                match = get_best_match(description, categories_data)
+                
+                new_row = {
+                    'Date': row.get('Date', ''),
+                    'Description': description,
+                    'Debit': row.get('Debit', ''),
+                    'Credit': row.get('Credit', ''),
+                    'Category': '',
+                    'Title': '',
+                    'Pattern': ''
+                }
+                
+                if match:
+                    new_row['Category'] = match['Category']
+                    new_row['Title'] = match['Title']
+                    new_row['Pattern'] = match['Pattern']
+                else:
+                    new_row['Category'] = description 
+                    new_row['Title'] = 'UNMATCHED'
+                
+                all_raw_rows.append(new_row)
 
     def parse_date(date_str):
-        # Strip and handle potential multiple spaces
         d_clean = " ".join(date_str.split())
         formats = ('%d/%m/%Y', '%Y-%m-%d', '%d-%m-%Y', '%d %b %Y', '%d %b %y', '%Y/%m/%d')
         for fmt in formats:
@@ -91,23 +97,54 @@ def process_csv(input_path, output_path, categories_path, config_path=None):
                 pass
         return datetime(1900, 1, 1)
 
-    processed_rows.sort(key=lambda x: parse_date(x['Date']))
-    
-    # Write processed.csv
-    with open(output_path, 'w', newline='') as csvfile:
-        writer = csv.DictWriter(csvfile, fieldnames=fieldnames, extrasaction='ignore')
-        writer.writeheader()
-        writer.writerows(processed_rows)
-        
-    # Write NO_CATEGORY.csv
-    if no_category_rows:
-        no_cat_path = input_path.replace('.csv', '.NO_CATEGORY.csv')
-        with open(no_cat_path, 'w', newline='') as csvfile:
-            writer = csv.DictWriter(csvfile, fieldnames=fieldnames, extrasaction='ignore')
-            writer.writeheader()
-            writer.writerows(no_category_rows)
+    # Sort all rows by date initially
+    all_raw_rows.sort(key=lambda x: parse_date(x['Date']))
 
-    return processed_rows, no_category_rows
+    # Split into Debits and Credits
+    debits = [r for r in all_raw_rows if r['Debit'] and r['Debit'].strip()]
+    credits = [r for r in all_raw_rows if r['Credit'] and r['Credit'].strip()]
+    
+    ignored_rows = []
+    
+    # Matching logic for internal transfers
+    # Key is (DateString, AmountString)
+    credit_pool = {}
+    for r in credits:
+        key = (r['Date'], r['Credit'])
+        credit_pool.setdefault(key, []).append(r)
+        
+    final_debits = []
+    for d in debits:
+        key = (d['Date'], d['Debit'])
+        if key in credit_pool and credit_pool[key]:
+            match_credit = credit_pool[key].pop(0)
+            ignored_rows.append(d)
+            ignored_rows.append(match_credit)
+        else:
+            final_debits.append(d)
+            
+    final_credits = [r for rows in credit_pool.values() for r in rows]
+    
+    # Sort again for output files
+    final_debits.sort(key=lambda x: parse_date(x['Date']))
+    final_credits.sort(key=lambda x: parse_date(x['Date']))
+    ignored_rows.sort(key=lambda x: parse_date(x['Date']))
+
+    # Write files
+    def write_safe(path, rows, fields):
+        with open(path, 'w', newline='') as f:
+            writer = csv.DictWriter(f, fieldnames=fields, extrasaction='ignore')
+            writer.writeheader()
+            writer.writerows(rows)
+
+    write_safe(output_base + '.debit.csv', final_debits, configs['debit'])
+    write_safe(output_base + '.credit.csv', final_credits, configs['credit'])
+    write_safe(output_base + '.ignored.csv', ignored_rows, configs['ignored'])
+
+    unmatched = [r for r in (final_debits + final_credits) if r['Title'] == 'UNMATCHED']
+    combined_results = final_debits + final_credits # UI normally wants categorized items
+
+    return combined_results, unmatched, ignored_rows
 
 if __name__ == "__main__":
     if len(sys.argv) < 2:

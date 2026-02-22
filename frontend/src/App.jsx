@@ -19,7 +19,11 @@ function App() {
   const [newPattern, setNewPattern] = useState({ desc: '', title: '' });
   const [isAddingCategory, setIsAddingCategory] = useState(false);
   const [newCategoryName, setNewCategoryName] = useState("");
-  const [columnOrder, setColumnOrder] = useState(['Date', 'Description', 'Category', 'Title', 'Debit', 'Credit']);
+  const [columnOrders, setColumnOrders] = useState({
+    debit: ['Date', 'Description', 'Category', 'Title', 'Debit'],
+    credit: ['Date', 'Description', 'Category', 'Title', 'Credit'],
+    ignored: ['Date', 'Description', 'Category', 'Title', 'Debit', 'Credit']
+  });
   const [highlightedPattern, setHighlightedPattern] = useState(null);
 
   // Edit Pattern State
@@ -34,7 +38,7 @@ function App() {
   // Drag and Drop State
   const [draggedItem, setDraggedItem] = useState(null); // { catName, pIdx }
   const [dragOverCatName, setDragOverCatName] = useState(null);
-  const [draggedColumnIdx, setDraggedColumnIdx] = useState(null);
+  const [draggedColumnInfo, setDraggedColumnInfo] = useState(null); // { type, idx }
 
   const handleDragStart = (e, catName, pIdx) => {
     setDraggedItem({ catName, pIdx });
@@ -72,20 +76,23 @@ function App() {
     setDraggedItem(null);
   };
 
-  const handleColumnDragStart = (e, idx) => {
-    setDraggedColumnIdx(idx);
+  const handleColumnDragStart = (e, type, idx) => {
+    setDraggedColumnInfo({ type, idx });
     e.dataTransfer.effectAllowed = "move";
   };
 
-  const handleColumnDragOver = (e, idx) => {
+  const handleColumnDragOver = (e, type, idx) => {
     e.preventDefault();
-    if (draggedColumnIdx === null || draggedColumnIdx === idx) return;
+    if (!draggedColumnInfo || draggedColumnInfo.type !== type || draggedColumnInfo.idx === idx) return;
 
-    const newOrder = [...columnOrder];
-    const item = newOrder.splice(draggedColumnIdx, 1)[0];
-    newOrder.splice(idx, 0, item);
-    setColumnOrder(newOrder);
-    setDraggedColumnIdx(idx);
+    const newOrders = { ...columnOrders };
+    const currentOrder = [...newOrders[type]];
+    const item = currentOrder.splice(draggedColumnInfo.idx, 1)[0];
+    currentOrder.splice(idx, 0, item);
+    newOrders[type] = currentOrder;
+
+    setColumnOrders(newOrders);
+    setDraggedColumnInfo({ type, idx });
   };
 
   useEffect(() => {
@@ -97,7 +104,11 @@ function App() {
     try {
       const res = await fetch(`${API_BASE}/config`);
       const data = await res.json();
-      if (data.column_order) setColumnOrder(data.column_order);
+      if (data.debit_columns) setColumnOrders({
+        debit: data.debit_columns,
+        credit: data.credit_columns,
+        ignored: data.ignored_columns
+      });
     } catch (err) {
       console.error("Failed to fetch config", err);
     }
@@ -126,7 +137,11 @@ function App() {
         fetch(`${API_BASE}/config`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ column_order: columnOrder })
+          body: JSON.stringify({
+            debit_columns: columnOrders.debit,
+            credit_columns: columnOrders.credit,
+            ignored_columns: columnOrders.ignored
+          })
         })
       ]);
       if (!silent) showMessage("All changes saved successfully!", "success");
@@ -183,9 +198,12 @@ function App() {
     }
   };
 
-  const runProcessing = async (fileToProcess) => {
+  const runProcessing = async (filesToProcess) => {
     const formData = new FormData();
-    formData.append('file', fileToProcess);
+    // Support multiple files
+    Array.from(filesToProcess).forEach(file => {
+      formData.append('files', file);
+    });
 
     try {
       const res = await fetch(`${API_BASE}/process`, {
@@ -201,10 +219,10 @@ function App() {
   };
 
   const handleFileUpload = async (e) => {
-    const selectedFile = e.target.files[0];
-    if (!selectedFile) return;
-    setCurrentFile(selectedFile);
-    await runProcessing(selectedFile);
+    const selectedFiles = e.target.files;
+    if (!selectedFiles || selectedFiles.length === 0) return;
+    setCurrentFile(selectedFiles); // Store file list
+    await runProcessing(selectedFiles);
   };
 
   const startAssignment = (item) => {
@@ -291,14 +309,23 @@ function App() {
     }
   };
 
-  const downloadCSV = () => {
-    if (!processedData || !processedData.results.length) return;
+  const downloadCSV = (type) => {
+    if (!processedData) return;
 
-    const headers = columnOrder;
-    const rows = processedData.results.map(row =>
+    const headers = columnOrders[type];
+    let data = [];
+    if (type === 'debit') data = processedData.results.filter(r => r.Debit && r.Debit.trim());
+    else if (type === 'credit') data = processedData.results.filter(r => r.Credit && r.Credit.trim());
+    else if (type === 'ignored') data = processedData.ignored;
+
+    if (!data.length) {
+      showMessage(`No ${type} entries to download`, "error");
+      return;
+    }
+
+    const rows = data.map(row =>
       headers.map(header => {
         const val = row[header] || '';
-        // Escape quotes and wrap in quotes if contains comma
         return typeof val === 'string' && (val.includes(',') || val.includes('"'))
           ? `"${val.replace(/"/g, '""')}"`
           : val;
@@ -310,12 +337,9 @@ function App() {
     const url = URL.createObjectURL(blob);
     const link = document.createElement("a");
 
-    // Generate filename based on current date (e.g. 21-Feb-2026.processed.csv)
     const now = new Date();
-    const day = String(now.getDate()).padStart(2, '0');
-    const month = now.toLocaleString('default', { month: 'short' });
-    const year = now.getFullYear();
-    const filename = `${day}-${month}-${year}.processed.csv`;
+    const dateStr = `${String(now.getDate()).padStart(2, '0')}-${now.toLocaleString('default', { month: 'short' })}-${now.getFullYear()}`;
+    const filename = `${dateStr}.${type}.csv`;
 
     link.setAttribute("href", url);
     link.setAttribute("download", filename);
@@ -415,20 +439,26 @@ function App() {
                   />
                 </div>
 
-                <div className="column-reorder-container">
-                  <span style={{ fontSize: '0.8rem', color: 'var(--text-muted)', marginRight: '0.5rem' }}>Column Order:</span>
-                  {(Array.isArray(columnOrder) ? columnOrder : []).map((col, idx) => (
-                    <motion.div
-                      key={col}
-                      className="column-tag"
-                      draggable
-                      onDragStart={(e) => handleColumnDragStart(e, idx)}
-                      onDragOver={(e) => handleColumnDragOver(e, idx)}
-                      onDragEnd={() => setDraggedColumnIdx(null)}
-                      layout
-                    >
-                      {col}
-                    </motion.div>
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: '2rem', marginTop: '1rem' }}>
+                  {['debit', 'credit', 'ignored'].map(type => (
+                    <div key={type} className="column-reorder-container" style={{ flex: '1 1 300px' }}>
+                      <span style={{ fontSize: '0.7rem', color: 'var(--text-muted)', display: 'block', marginBottom: '0.5rem', textTransform: 'uppercase' }}>{type} Columns:</span>
+                      <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.5rem' }}>
+                        {(Array.isArray(columnOrders[type]) ? columnOrders[type] : []).map((col, idx) => (
+                          <motion.div
+                            key={`${type}-${col}`}
+                            className="column-tag"
+                            draggable
+                            onDragStart={(e) => handleColumnDragStart(e, type, idx)}
+                            onDragOver={(e) => handleColumnDragOver(e, type, idx)}
+                            onDragEnd={() => setDraggedColumnInfo(null)}
+                            layout
+                          >
+                            {col}
+                          </motion.div>
+                        ))}
+                      </div>
+                    </div>
                   ))}
                 </div>
               </div>
@@ -571,26 +601,29 @@ function App() {
             {!processedData ? (
               <div style={{ textAlign: 'center', padding: '4rem' }}>
                 <Upload size={48} style={{ color: 'var(--primary)', marginBottom: '1rem' }} />
-                <h2>Upload Bank Statement</h2>
-                <p style={{ color: 'var(--text-muted)', marginBottom: '2rem' }}>Drop your CSV file here to see the magic happen</p>
-                <input type="file" id="csv-upload" style={{ display: 'none' }} onChange={handleFileUpload} accept=".csv" />
+                <h2>Upload Bank Statements</h2>
+                <p style={{ color: 'var(--text-muted)', marginBottom: '2rem' }}>Drop one or more CSV files here to see the magic happen</p>
+                <input type="file" id="csv-upload" style={{ display: 'none' }} onChange={handleFileUpload} accept=".csv" multiple />
                 <label htmlFor="csv-upload" className="btn btn-primary" style={{ margin: '0 auto', width: 'fit-content' }}>
-                  Choose File
+                  Choose Files
                 </label>
               </div>
             ) : (
               <div>
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '2rem' }}>
                   <h2>Processing Summary</h2>
-                  <div style={{ display: 'flex', gap: '1rem' }}>
-                    <button className="btn btn-primary" onClick={downloadCSV}>
-                      <Download size={18} /> Download {(() => {
-                        const now = new Date();
-                        return `${String(now.getDate()).padStart(2, '0')}-${now.toLocaleString('default', { month: 'short' })}-${now.getFullYear()}`;
-                      })()}.processed.csv
+                  <div style={{ display: 'flex', gap: '0.5rem' }}>
+                    <button className="btn btn-primary" style={{ fontSize: '0.8rem' }} onClick={() => downloadCSV('debit')}>
+                      <Download size={14} /> Debits
                     </button>
-                    <button className="btn btn-ghost" onClick={() => setProcessedData(null)}>
-                      Upload New
+                    <button className="btn btn-primary" style={{ fontSize: '0.8rem' }} onClick={() => downloadCSV('credit')}>
+                      <Download size={14} /> Credits
+                    </button>
+                    <button className="btn btn-primary" style={{ fontSize: '0.8rem', background: 'var(--text-muted)' }} onClick={() => downloadCSV('ignored')}>
+                      <Download size={14} /> Ignored
+                    </button>
+                    <button className="btn btn-ghost" style={{ fontSize: '0.8rem' }} onClick={() => setProcessedData(null)}>
+                      Clear
                     </button>
                   </div>
                 </div>
@@ -676,12 +709,12 @@ function App() {
                   </div>
                 )}
 
-                <h3>Processed Results</h3>
+                <h3>Transactions</h3>
                 <div className="table-container">
                   <table>
                     <thead>
                       <tr>
-                        {(Array.isArray(columnOrder) ? columnOrder : []).map(col => <th key={col}>{col}</th>)}
+                        {['Date', 'Description', 'Category', 'Title', 'Debit', 'Credit'].map(col => <th key={col}>{col}</th>)}
                         <th>Action</th>
                       </tr>
                     </thead>
@@ -698,9 +731,8 @@ function App() {
                                 borderLeft: isHighlighted ? '4px solid var(--primary)' : 'none',
                                 transition: 'all 0.2s ease'
                               }}
-                              title={row.Pattern ? `Pattern: ${row.Pattern}` : ''}
                             >
-                              {(Array.isArray(columnOrder) ? columnOrder : []).map(col => (
+                              {['Date', 'Description', 'Category', 'Title', 'Debit', 'Credit'].map(col => (
                                 <td key={col}>
                                   {col === 'Category' ? (
                                     <span className={`badge ${row.Title === 'UNMATCHED' ? 'badge-ignored' : 'badge-match'}`}>
@@ -710,8 +742,6 @@ function App() {
                                     <span style={{ fontWeight: 600 }}>{row.Title}</span>
                                   ) : col === 'Description' ? (
                                     <span style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>{row.Description}</span>
-                                  ) : col === 'Debit' || col === 'Credit' ? (
-                                    row[col]
                                   ) : (
                                     row[col]
                                   )}
@@ -721,12 +751,8 @@ function App() {
                                 {row.Pattern && (
                                   <button
                                     className="btn-ghost"
-                                    style={{ padding: '0.2rem', border: 'none', minWidth: '24px' }}
-                                    onClick={(e) => {
-                                      e.stopPropagation();
-                                      startQuickEdit(row);
-                                    }}
-                                    title="Adjust Pattern"
+                                    style={{ padding: '0.2rem', border: 'none' }}
+                                    onClick={(e) => { e.stopPropagation(); startQuickEdit(row); }}
                                   >
                                     <Edit2 size={14} />
                                   </button>
@@ -735,7 +761,7 @@ function App() {
                             </tr>
                             {quickEditItem === row && (
                               <tr key={`edit-${i}`}>
-                                <td colSpan={columnOrder.length + 1} style={{ padding: '0' }}>
+                                <td colSpan={7} style={{ padding: '0' }}>
                                   <motion.div
                                     initial={{ height: 0, opacity: 0 }}
                                     animate={{ height: 'auto', opacity: 1 }}
@@ -769,8 +795,8 @@ function App() {
                                         </select>
                                       </div>
                                       <div style={{ display: 'flex', gap: '0.5rem' }}>
-                                        <button className="btn btn-primary" style={{ padding: '0.5rem 1rem', fontSize: '0.8rem' }} onClick={commitQuickEdit}>Update</button>
-                                        <button className="btn btn-ghost" style={{ padding: '0.5rem 1rem', fontSize: '0.8rem' }} onClick={() => setQuickEditItem(null)}>Cancel</button>
+                                        <button className="btn btn-primary" onClick={commitQuickEdit}>Update</button>
+                                        <button className="btn btn-ghost" onClick={() => setQuickEditItem(null)}>Cancel</button>
                                       </div>
                                     </div>
                                   </motion.div>
@@ -780,6 +806,30 @@ function App() {
                           </React.Fragment>
                         );
                       })}
+                    </tbody>
+                  </table>
+                </div>
+
+                <h3 style={{ marginTop: '3rem' }}>Ignored (Internal Transfers)</h3>
+                <div className="table-container">
+                  <table>
+                    <thead>
+                      <tr>
+                        <th>Date</th>
+                        <th>Description</th>
+                        <th>Debit</th>
+                        <th>Credit</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {processedData.ignored.map((row, i) => (
+                        <tr key={i}>
+                          <td>{row.Date}</td>
+                          <td style={{ fontSize: '0.8rem' }}>{row.Description}</td>
+                          <td>{row.Debit}</td>
+                          <td>{row.Credit}</td>
+                        </tr>
+                      ))}
                     </tbody>
                   </table>
                 </div>

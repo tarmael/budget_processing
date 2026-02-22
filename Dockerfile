@@ -18,26 +18,25 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential \
     && rm -rf /var/lib/apt/lists/*
 
-# Copy requirements and install
+# 1. Install Python dependencies (Mostly static)
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Copy backend code
-COPY server.py process.py ./
-
-# Copy built frontend from stage 1
+# 2. Add Frontend Assets (Build result)
 COPY --from=build-frontend /app/frontend/dist ./frontend/dist
 
-# Ensure input directory exists
+# 3. Add Backend Logic (Most frequent changes)
+COPY server.py process.py .env ./
+
+# Ensure input directory exists for local mounts
 RUN mkdir -p /app/input
 
 # Environment variables
 ENV CATEGORIES_PATH=/app/input/categories.json
 ENV CONFIG_PATH=/app/input/config.json
 ENV PORT=8000
+ENV PYTHONUNBUFFERED=1
 
-# Expose port
 EXPOSE 8000
 
-# Run the server
 CMD ["python", "server.py"]
