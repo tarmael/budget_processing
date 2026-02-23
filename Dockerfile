@@ -26,7 +26,7 @@ RUN pip install --no-cache-dir -r requirements.txt
 COPY --from=build-frontend /app/frontend/dist ./frontend/dist
 
 # 3. Add Backend Logic (Most frequent changes)
-COPY server.py process.py .env ./
+COPY server.py process.py database.py .env ./
 
 # Ensure input directory exists for local mounts
 RUN mkdir -p /app/input
@@ -34,6 +34,7 @@ RUN mkdir -p /app/input
 # Environment variables
 ENV CATEGORIES_PATH=/app/input/categories.json
 ENV CONFIG_PATH=/app/input/config.json
+ENV DATABASE_PATH=/app/input/transactions.db
 ENV PORT=8000
 ENV PYTHONUNBUFFERED=1
 

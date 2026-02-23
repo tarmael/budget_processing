@@ -4,6 +4,7 @@ import sys
 import os
 from datetime import datetime
 from rapidfuzz import process, fuzz
+import database
 
 def load_categories(file_path):
     with open(file_path, 'r') as f:
@@ -39,6 +40,7 @@ def process_csv(input_paths, output_base, categories_path, config_path=None):
         input_paths = [input_paths]
         
     categories_data = load_categories(categories_path)
+    database.init_db()
     
     # Load config for column orders
     configs = {
@@ -70,6 +72,7 @@ def process_csv(input_paths, output_base, categories_path, config_path=None):
                     'Description': description,
                     'Debit': str(row.get('Debit', '') or '').strip(),
                     'Credit': str(row.get('Credit', '') or '').strip(),
+                    'Balance': str(row.get('Balance', '') or '').strip(),
                     'Category': '',
                     'Title': '',
                     'Pattern': ''
@@ -108,6 +111,11 @@ def process_csv(input_paths, output_base, categories_path, config_path=None):
             if key in transfer_credits and transfer_credits[key]:
                 # Found a match! Move both to duplicates
                 match_credit = transfer_credits[key].pop(0)
+                
+                # Mark as paired for database
+                row['_is_paired'] = True
+                match_credit['_is_paired'] = True
+                
                 duplicates.append(row)
                 duplicates.append(match_credit)
             else:
@@ -163,6 +171,12 @@ def process_csv(input_paths, output_base, categories_path, config_path=None):
         # GEMINI.md says: Date, Description, Category, Title, Debit, Credit
         no_cat_fields = ['Date', 'Description', 'Category', 'Title', 'Debit', 'Credit']
         write_safe(output_base + '.NO_CATEGORY.csv', unmatched, no_cat_fields)
+
+    # Persist to database
+    # Since multiple files can be processed, we attribute them to the output base 
+    # or the first input file. To be more precise, we could track per-row source.
+    # For now, we'll use the output_base as the source reference.
+    database.upsert_transactions(all_raw_rows + duplicates, output_base)
 
     return all_raw_rows, unmatched, duplicates
 

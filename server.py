@@ -8,6 +8,7 @@ from typing import List, Dict, Any
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
 import process # Import our logic from process.py
+import database
 from dotenv import load_dotenv
 
 # Load local environment variables if .env exists
@@ -52,6 +53,11 @@ async def get_categories():
 async def save_categories(data: Dict[str, Any]):
     with open(CATEGORIES_FILE, "w") as f:
         json.dump(data, f, indent=4)
+    
+    # Trigger database sync when categories change
+    # This re-categorizes any transaction that hasn't been manually locked
+    database.sync_categories(process.get_best_match, data)
+    
     return {"status": "success"}
 
 @app.get("/api/config")
@@ -109,6 +115,40 @@ async def process_statement(files: List[UploadFile] = File(...)):
             path = output_base + suffix
             if os.path.exists(path): os.remove(path)
 
+# --- Dashboard & Insights Endpoints ---
+
+@app.get("/api/dashboard")
+async def get_dashboard():
+    return database.get_dashboard_data()
+
+@app.get("/api/transactions/{month}")
+async def get_monthly_transactions(month: str):
+    return database.get_transactions_for_month(month)
+
+@app.post("/api/manual_override")
+async def manual_override(data: Dict[str, Any]):
+    # Expects: { "id": 123, "category": "Food", "title": "Pizza" }
+    database.set_manual_override(data['id'], data['category'], data['title'])
+    return {"status": "success"}
+
+@app.post("/api/balance_anchor")
+async def set_balance_anchor(data: Dict[str, Any]):
+    # Expects: { "date": "2024-07-01", "balance": 5000.0 }
+    database.set_balance_anchor(data['date'], data['balance'])
+    return {"status": "success"}
+
+@app.get("/api/balance_anchors")
+async def get_balance_anchors():
+    return database.get_balance_anchors()
+
+@app.delete("/api/transactions/{transaction_id}")
+async def delete_transaction(transaction_id: int):
+    database.delete_transaction(transaction_id)
+    return {"status": "success"}
+
 if __name__ == "__main__":
     import uvicorn
+    # Initialize database on startup to ensure tables exist
+    print("INFO: Initializing database...")
+    database.init_db()
     uvicorn.run(app, host="0.0.0.0", port=8000)
