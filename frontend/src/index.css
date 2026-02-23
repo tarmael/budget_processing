@@ -274,6 +274,56 @@ td {
   padding: 1.25rem 1rem;
 }
 
+.horizontal-table {
+  white-space: nowrap;
+}
+
+.horizontal-table .row-label {
+  position: sticky;
+  left: 0;
+  background: var(--bg-dark);
+  z-index: 1;
+  font-weight: 500;
+  min-width: 140px;
+  border-right: 1px solid var(--border);
+}
+
+.horizontal-table thead .row-label {
+  background: var(--bg-dark);
+}
+
+.horizontal-table .month-header {
+  text-align: center;
+  min-width: 110px;
+  font-size: 0.85rem;
+}
+
+.horizontal-table td {
+  text-align: center;
+  font-size: 0.85rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.summary-highlight-row {
+  border-top: 2px solid var(--border);
+  background: rgba(255, 255, 255, 0.03);
+}
+
+.clickable-row {
+  transition: background 0.15s ease;
+  border-radius: 0.5rem;
+  padding: 0.5rem 0.75rem;
+}
+
+.clickable-row:hover {
+  background: rgba(255, 255, 255, 0.05);
+}
+
+.clickable-row.active-filter {
+  background: rgba(99, 102, 241, 0.15);
+  border-left: 3px solid var(--primary);
+}
+
 .override-select,
 .fy-select {
   background: rgba(15, 23, 42, 0.5);

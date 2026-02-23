@@ -35,7 +35,7 @@ def get_best_match(description, categories_data, threshold=80):
     
     return best_match
 
-def process_csv(input_paths, output_base, categories_path, config_path=None):
+def process_csv(input_paths, output_base, categories_path, config_path=None, column_mapping=None):
     if isinstance(input_paths, str):
         input_paths = [input_paths]
         
@@ -59,20 +59,32 @@ def process_csv(input_paths, output_base, categories_path, config_path=None):
         except Exception:
             pass
 
+    # Default column mapping (standard schema)
+    col_map = {
+        'date': 'Date',
+        'description': 'Description',
+        'debit': 'Debit',
+        'credit': 'Credit',
+        'balance': 'Balance'
+    }
+    if column_mapping:
+        col_map.update(column_mapping)
+
     all_raw_rows = []
     for path in input_paths:
         with open(path, 'r', newline='') as csvfile:
             reader = csv.DictReader(csvfile)
             for row in reader:
-                description = str(row.get('Description', '') or '').strip()
+                # Map bank-specific columns to standard schema
+                description = str(row.get(col_map['description'], '') or '').strip()
                 match = get_best_match(description, categories_data)
                 
                 new_row = {
-                    'Date': str(row.get('Date', '') or '').strip(),
+                    'Date': str(row.get(col_map['date'], '') or '').strip(),
                     'Description': description,
-                    'Debit': str(row.get('Debit', '') or '').strip(),
-                    'Credit': str(row.get('Credit', '') or '').strip(),
-                    'Balance': str(row.get('Balance', '') or '').strip(),
+                    'Debit': str(row.get(col_map['debit'], '') or '').strip(),
+                    'Credit': str(row.get(col_map['credit'], '') or '').strip(),
+                    'Balance': str(row.get(col_map['balance'], '') or '').strip(),
                     'Category': '',
                     'Title': '',
                     'Pattern': ''

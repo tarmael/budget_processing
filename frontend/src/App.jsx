@@ -1,13 +1,13 @@
 import React, { useState, useEffect } from 'react';
 import {
   Plus, Save, Upload, Trash2, Search, Filter, Edit2, Download,
-  ChevronRight, AlertCircle, CheckCircle2, X, BarChart3, LayoutDashboard,
+  ChevronRight, ChevronLeft, AlertCircle, CheckCircle2, X, BarChart3, LayoutDashboard,
   Calendar, ArrowLeft, Wallet, TrendingUp
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
   ComposedChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
-  BarChart, Bar, Cell, Legend, Line
+  BarChart, Bar, Cell, Legend, Line, PieChart, Pie
 } from 'recharts';
 
 const API_BASE = import.meta.env.VITE_API_BASE || "/api";
@@ -23,14 +23,17 @@ function App() {
   const [dashboardData, setDashboardData] = useState(null);
   const [selectedMonth, setSelectedMonth] = useState(null);
   const [monthlyTransactions, setMonthlyTransactions] = useState([]);
-  const [selectedFY, setSelectedFY] = useState(new Date().getFullYear());
-  const [fyStartMonth, setFyStartMonth] = useState(7);
+  const [selectedFY, setSelectedFY] = useState(null); // Will be set once fyStartMonth loads
+  const [fyStartMonth, setFyStartMonth] = useState(7); // Default Aus FY, updated from config
+  const [fyPreset, setFyPreset] = useState('australian'); // 'australian' | 'calendar' | 'custom'
   const [balanceAnchors, setBalanceAnchors] = useState([]);
   const [isAddingAnchor, setIsAddingAnchor] = useState(false);
   const [newAnchor, setNewAnchor] = useState({ date: '', balance: '' });
   const [selectedDrillDownCategory, setSelectedDrillDownCategory] = useState(null);
 
   const [currentFile, setCurrentFile] = useState(null);
+  const [selectedBankProfile, setSelectedBankProfile] = useState('great_southern');
+  const [bankProfiles, setBankProfiles] = useState({});
   const [message, setMessage] = useState(null);
   const [editingCatIndex, setEditingCatIndex] = useState(null);
   const [newPattern, setNewPattern] = useState({ desc: '', title: '' });
@@ -129,9 +132,47 @@ function App() {
         credit: data.credit_columns,
         duplicates: data.duplicates_columns || data.ignored_columns
       });
+      // Load FY configuration
+      const startMonth = data.fy_start_month || 7;
+      setFyStartMonth(startMonth);
+      if (startMonth === 7) setFyPreset('australian');
+      else if (startMonth === 1) setFyPreset('calendar');
+      else setFyPreset('custom');
+      // Compute which FY the current date belongs to
+      setSelectedFY(getFYForDate(new Date(), startMonth));
+      // Load bank profiles
+      if (data.bank_profiles) setBankProfiles(data.bank_profiles);
+      if (data.default_bank_profile) setSelectedBankProfile(data.default_bank_profile);
     } catch (err) {
       console.error("Failed to fetch config", err);
     }
+  };
+
+  // Given a date and the FY start month, determine the FY label year.
+  // E.g. for Australian FY (start=7), Feb 2026 -> FY 2026, Aug 2026 -> FY 2027
+  const getFYForDate = (date, startMonth) => {
+    const m = date.getMonth() + 1; // 1-indexed
+    const y = date.getFullYear();
+    if (startMonth === 1) return y; // Calendar year
+    return m >= startMonth ? y + 1 : y;
+  };
+
+  // Get the 12 months (YYYY-MM strings) for a given FY and start month.
+  const getFYMonths = (fy, startMonth) => {
+    const months = [];
+    for (let i = 0; i < 12; i++) {
+      let m = startMonth + i;
+      let y = startMonth === 1 ? fy : fy - 1;
+      if (m > 12) { m -= 12; y += 1; }
+      months.push(`${y}-${String(m).padStart(2, '0')}`);
+    }
+    return months;
+  };
+
+  // Display-friendly FY label
+  const getFYLabel = (fy, startMonth) => {
+    if (startMonth === 1) return `${fy}`;
+    return `${fy - 1}/${String(fy).slice(-2)}`;
   };
 
   const fetchDashboardData = async () => {
@@ -302,7 +343,8 @@ function App() {
       formData.append('files', file);
     });
     try {
-      const res = await fetch(`${API_BASE}/process`, { method: 'POST', body: formData });
+      const profileParam = selectedBankProfile ? `?bank_profile=${encodeURIComponent(selectedBankProfile)}` : '';
+      const res = await fetch(`${API_BASE}/process${profileParam}`, { method: 'POST', body: formData });
       const data = await res.json();
       if (!res.ok) throw new Error(data?.detail || "Processing failed");
       setProcessedData({
@@ -362,13 +404,31 @@ function App() {
   );
 
   const getWorthData = () => {
-    if (!dashboardData?.monthly) return [];
-    const sortedMonthly = [...dashboardData.monthly].sort((a, b) => a.month.localeCompare(b.month));
+    if (!dashboardData?.monthly || !selectedFY) return [];
+
+    // Determine which months belong to this FY
+    const fyMonthList = getFYMonths(selectedFY, fyStartMonth);
+    const fyMonthSet = new Set(fyMonthList);
+
+    const sortedMonthly = [...dashboardData.monthly]
+      .filter(m => fyMonthSet.has(m.month))
+      .sort((a, b) => a.month.localeCompare(b.month));
+
     let runningBalance = 0;
     if (balanceAnchors.length > 0) {
       const sortedAnchors = [...balanceAnchors].sort((a, b) => a.date.localeCompare(b.date));
       runningBalance = sortedAnchors[0].balance;
+
+      // Walk through all months BEFORE this FY to build up the starting balance
+      const allMonths = [...dashboardData.monthly].sort((a, b) => a.month.localeCompare(b.month));
+      for (const m of allMonths) {
+        if (fyMonthSet.has(m.month)) break;
+        if (m.month < fyMonthList[0]) {
+          runningBalance += (m.income - m.expenses);
+        }
+      }
     }
+
     return sortedMonthly.map(m => {
       const startBal = runningBalance;
       runningBalance += (m.income - m.expenses);
@@ -411,7 +471,6 @@ function App() {
   };
 
   const worthData = getWorthData();
-  const topExpenses = (dashboardData?.categories?.expenses || []).slice(0, 8).map(c => ({ name: c.cat, total: c.total }));
 
   return (
     <div className="app-container">
@@ -537,103 +596,213 @@ function App() {
           <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="dashboard-container">
             {!selectedMonth ? (
               <>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '2rem' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '2rem', flexWrap: 'wrap', gap: '1rem' }}>
                   <div style={{ display: 'flex', gap: '1rem', alignItems: 'center' }}>
                     <Calendar className="text-primary" />
-                    <h2>Financial Year {selectedFY}</h2>
+                    <button className="btn btn-ghost btn-sm" onClick={() => setSelectedFY(prev => prev - 1)}><ChevronLeft size={18} /></button>
+                    <h2 style={{ margin: 0, minWidth: '140px', textAlign: 'center' }}>FY {getFYLabel(selectedFY, fyStartMonth)}</h2>
+                    <button className="btn btn-ghost btn-sm" onClick={() => setSelectedFY(prev => prev + 1)}><ChevronRight size={18} /></button>
                   </div>
-                  <button className="btn btn-ghost" onClick={() => setIsAddingAnchor(true)}><Wallet size={18} /> Balance Anchor</button>
-                </div>
-
-                <div className="summary-grid">
-                  <div className="glass-card stat-card">
-                    <span className="label">Total Income</span>
-                    <h2 className="text-success">${(dashboardData?.monthly || []).reduce((acc, c) => acc + c.income, 0).toLocaleString()}</h2>
-                  </div>
-                  <div className="glass-card stat-card">
-                    <span className="label">Total Expenses</span>
-                    <h2 className="text-danger">${(dashboardData?.monthly || []).reduce((acc, c) => acc + c.expenses, 0).toLocaleString()}</h2>
-                  </div>
-                  <div className="glass-card stat-card">
-                    <span className="label">Current Net Change</span>
-                    <h2 className="text-primary">${(worthData[worthData.length - 1]?.worth || 0).toLocaleString()}</h2>
-                  </div>
-                </div>
-
-                <div className="charts-grid mt-2">
-                  <div className="glass-card" style={{ gridColumn: 'span 2', minHeight: '400px' }}>
-                    <h3 style={{ marginBottom: '1.5rem', display: 'flex', alignItems: 'center', gap: '0.5rem' }}><TrendingUp size={20} className="text-primary" /> Financial Performance Summary</h3>
-                    <div style={{ width: '100%', height: 320 }}>
-                      <ResponsiveContainer>
-                        <ComposedChart data={worthData}>
-                          <defs>
-                            <linearGradient id="colorWorth" x1="0" y1="0" x2="0" y2="1">
-                              <stop offset="5%" stopColor="var(--primary)" stopOpacity={0.3} /><stop offset="95%" stopColor="var(--primary)" stopOpacity={0} />
-                            </linearGradient>
-                            <linearGradient id="colorIncome" x1="0" y1="0" x2="0" y2="1">
-                              <stop offset="5%" stopColor="var(--success)" stopOpacity={0.2} /><stop offset="95%" stopColor="var(--success)" stopOpacity={0} />
-                            </linearGradient>
-                            <linearGradient id="colorExpenses" x1="0" y1="0" x2="0" y2="1">
-                              <stop offset="5%" stopColor="var(--danger)" stopOpacity={0.2} /><stop offset="95%" stopColor="var(--danger)" stopOpacity={0} />
-                            </linearGradient>
-                            <linearGradient id="colorStart" x1="0" y1="0" x2="0" y2="1">
-                              <stop offset="5%" stopColor="rgba(255,255,255,0.4)" stopOpacity={0.1} /><stop offset="95%" stopColor="rgba(255,255,255,0.4)" stopOpacity={0} />
-                            </linearGradient>
-                          </defs>
-                          <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.05)" vertical={false} />
-                          <XAxis dataKey="name" stroke="var(--text-muted)" fontSize={12} tickLine={false} axisLine={false} />
-                          <YAxis yAxisId="left" stroke="var(--text-muted)" fontSize={12} tickLine={false} axisLine={false} tickFormatter={(val) => `$${val}`} />
-                          <YAxis yAxisId="right" orientation="right" stroke="var(--primary)" fontSize={12} tickLine={false} axisLine={false} tickFormatter={(val) => `$${val}`} />
-                          <Tooltip content={<CustomTrendTooltip />} />
-                          <Legend verticalAlign="top" height={36} />
-
-                          <Area yAxisId="left" type="monotone" dataKey="income" name="Monthly Income" stroke="var(--success)" strokeWidth={2} fillOpacity={1} fill="url(#colorIncome)" />
-                          <Area yAxisId="left" type="monotone" dataKey="expenses" name="Monthly Expenses" stroke="var(--danger)" strokeWidth={2} fillOpacity={1} fill="url(#colorExpenses)" />
-                          <Area yAxisId="right" type="monotone" dataKey="startBalance" name="Starting Balance" stroke="rgba(255,255,255,0.4)" strokeDasharray="5 5" strokeWidth={2} fillOpacity={1} fill="url(#colorStart)" />
-                          <Area yAxisId="right" type="monotone" dataKey="worth" name="Net Worth (End)" stroke="var(--primary)" strokeWidth={3} fillOpacity={1} fill="url(#colorWorth)" />
-                        </ComposedChart>
-                      </ResponsiveContainer>
-                    </div>
-                  </div>
-                  <div className="glass-card" style={{ minHeight: '400px' }}>
-                    <h3 className="mb-2" style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}><BarChart3 size={20} className="text-danger" /> Top Expenses</h3>
-                    <div style={{ width: '100%', height: 320 }}>
-                      <ResponsiveContainer>
-                        <BarChart data={topExpenses} layout="vertical" margin={{ left: 20 }}>
-                          <XAxis type="number" hide />
-                          <YAxis dataKey="name" type="category" stroke="var(--text-muted)" fontSize={10} width={100} tickLine={false} axisLine={false} />
-                          <Tooltip contentStyle={{ background: 'var(--bg-dark)', border: '1px solid var(--border)', borderRadius: '1rem' }} />
-                          <Bar dataKey="total" fill="var(--danger)" radius={[0, 4, 4, 0]} barSize={20} />
-                        </BarChart>
-                      </ResponsiveContainer>
-                    </div>
+                  <div style={{ display: 'flex', gap: '0.75rem', alignItems: 'center' }}>
+                    <select
+                      className="fy-select"
+                      value={fyPreset}
+                      onChange={(e) => {
+                        const preset = e.target.value;
+                        setFyPreset(preset);
+                        let newStart = fyStartMonth;
+                        if (preset === 'australian') newStart = 7;
+                        else if (preset === 'calendar') newStart = 1;
+                        if (preset !== 'custom') {
+                          setFyStartMonth(newStart);
+                          setSelectedFY(getFYForDate(new Date(), newStart));
+                          // Save to config
+                          fetch(`${API_BASE}/config`).then(r => r.json()).then(cfg => {
+                            cfg.fy_start_month = newStart;
+                            fetch(`${API_BASE}/config`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(cfg) });
+                          });
+                        }
+                      }}
+                    >
+                      <option value="australian">Australian FY (Jul–Jun)</option>
+                      <option value="calendar">Calendar Year (Jan–Dec)</option>
+                      <option value="custom">Custom</option>
+                    </select>
+                    {fyPreset === 'custom' && (
+                      <select
+                        className="fy-select"
+                        value={fyStartMonth}
+                        onChange={(e) => {
+                          const newStart = Number(e.target.value);
+                          setFyStartMonth(newStart);
+                          setSelectedFY(getFYForDate(new Date(), newStart));
+                          fetch(`${API_BASE}/config`).then(r => r.json()).then(cfg => {
+                            cfg.fy_start_month = newStart;
+                            fetch(`${API_BASE}/config`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(cfg) });
+                          });
+                        }}
+                      >
+                        {Array.from({ length: 12 }, (_, i) => i + 1).map(m => (
+                          <option key={m} value={m}>{new Date(2000, m - 1).toLocaleDateString('en-AU', { month: 'long' })}</option>
+                        ))}
+                      </select>
+                    )}
+                    <button className="btn btn-ghost" onClick={() => setIsAddingAnchor(true)}><Wallet size={18} /> Balance Anchor</button>
                   </div>
                 </div>
 
-                <div className="glass-card mt-2">
-                  <table className="dashboard-table">
-                    <thead><tr><th>Month</th><th>Income</th><th>Expenses</th><th>Net Flow</th><th>Action</th></tr></thead>
-                    <tbody>
-                      {(dashboardData?.monthly || []).map((m) => (
-                        <tr key={m.month}>
-                          <td>{new Date(m.month + '-01').toLocaleDateString('en-AU', { month: 'long', year: 'numeric' })}</td>
-                          <td className="text-success">${m.income.toLocaleString()}</td>
-                          <td className="text-danger">${m.expenses.toLocaleString()}</td>
-                          <td className={m.income - m.expenses >= 0 ? "text-success" : "text-danger"}>${(m.income - m.expenses).toLocaleString()}</td>
-                          <td><button className="btn btn-ghost btn-sm" onClick={() => fetchMonthTransactions(m.month)}>Drill Down <ChevronRight size={14} /></button></td>
+                {/* Charts */}
+                <div className="glass-card mb-2" style={{ minHeight: '400px' }}>
+                  <h3 style={{ marginBottom: '1.5rem', display: 'flex', alignItems: 'center', gap: '0.5rem' }}><TrendingUp size={20} className="text-primary" /> Financial Performance</h3>
+                  <div style={{ width: '100%', height: 320 }}>
+                    <ResponsiveContainer>
+                      <ComposedChart data={worthData}>
+                        <defs>
+                          <linearGradient id="colorWorth" x1="0" y1="0" x2="0" y2="1">
+                            <stop offset="5%" stopColor="var(--primary)" stopOpacity={0.3} /><stop offset="95%" stopColor="var(--primary)" stopOpacity={0} />
+                          </linearGradient>
+                          <linearGradient id="colorIncome" x1="0" y1="0" x2="0" y2="1">
+                            <stop offset="5%" stopColor="var(--success)" stopOpacity={0.2} /><stop offset="95%" stopColor="var(--success)" stopOpacity={0} />
+                          </linearGradient>
+                          <linearGradient id="colorExpenses" x1="0" y1="0" x2="0" y2="1">
+                            <stop offset="5%" stopColor="var(--danger)" stopOpacity={0.2} /><stop offset="95%" stopColor="var(--danger)" stopOpacity={0} />
+                          </linearGradient>
+                          <linearGradient id="colorStart" x1="0" y1="0" x2="0" y2="1">
+                            <stop offset="5%" stopColor="rgba(255,255,255,0.4)" stopOpacity={0.1} /><stop offset="95%" stopColor="rgba(255,255,255,0.4)" stopOpacity={0} />
+                          </linearGradient>
+                        </defs>
+                        <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.05)" vertical={false} />
+                        <XAxis dataKey="name" stroke="var(--text-muted)" fontSize={12} tickLine={false} axisLine={false} />
+                        <YAxis yAxisId="left" stroke="var(--text-muted)" fontSize={12} tickLine={false} axisLine={false} tickFormatter={(val) => `$${val}`} />
+                        <YAxis yAxisId="right" orientation="right" stroke="var(--primary)" fontSize={12} tickLine={false} axisLine={false} tickFormatter={(val) => `$${val}`} />
+                        <Tooltip content={<CustomTrendTooltip />} />
+                        <Legend verticalAlign="top" height={36} />
+                        <Area yAxisId="left" type="monotone" dataKey="income" name="Monthly Income" stroke="var(--success)" strokeWidth={2} fillOpacity={1} fill="url(#colorIncome)" />
+                        <Area yAxisId="left" type="monotone" dataKey="expenses" name="Monthly Expenses" stroke="var(--danger)" strokeWidth={2} fillOpacity={1} fill="url(#colorExpenses)" />
+                        <Area yAxisId="right" type="monotone" dataKey="startBalance" name="Starting Balance" stroke="rgba(255,255,255,0.4)" strokeDasharray="5 5" strokeWidth={2} fillOpacity={1} fill="url(#colorStart)" />
+                        <Area yAxisId="right" type="monotone" dataKey="worth" name="Net Worth (End)" stroke="var(--primary)" strokeWidth={3} fillOpacity={1} fill="url(#colorWorth)" />
+                      </ComposedChart>
+                    </ResponsiveContainer>
+                  </div>
+                </div>
+
+                {/* Table 1: Summary */}
+                <div className="glass-card mb-2">
+                  <h3 className="mb-1" style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}><BarChart3 size={20} className="text-primary" /> Summary</h3>
+                  <div className="table-container">
+                    <table className="dashboard-table horizontal-table">
+                      <thead>
+                        <tr>
+                          <th className="row-label"></th>
+                          {worthData.map(m => (
+                            <th key={m.month} className="month-header" style={{ cursor: 'pointer' }} onClick={() => fetchMonthTransactions(m.month)}>
+                              {m.name}
+                            </th>
+                          ))}
                         </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-                <div className="summary-grid mt-2">
-                  <div className="glass-card">
-                    <h3 className="mb-1 text-success">Income by Category</h3>
-                    <div className="category-stats">{(dashboardData?.categories?.income || []).map(cat => <div key={cat.cat} className="stat-row"><span>{cat.cat}</span><span className="text-success">${cat.total.toLocaleString()}</span></div>)}</div>
+                      </thead>
+                      <tbody>
+                        <tr>
+                          <td className="row-label">Income</td>
+                          {worthData.map(m => <td key={m.month} className="text-success">${m.income.toLocaleString()}</td>)}
+                        </tr>
+                        <tr>
+                          <td className="row-label">Expenses</td>
+                          {worthData.map(m => <td key={m.month} className="text-danger">${m.expenses.toLocaleString()}</td>)}
+                        </tr>
+                        <tr className="summary-highlight-row">
+                          <td className="row-label"><strong>Net Savings</strong></td>
+                          {worthData.map(m => {
+                            const net = m.income - m.expenses;
+                            return <td key={m.month} className={net >= 0 ? "text-success" : "text-danger"}><strong>${net.toLocaleString()}</strong></td>;
+                          })}
+                        </tr>
+                        <tr>
+                          <td className="row-label">Starting Balance</td>
+                          {worthData.map(m => <td key={m.month}>${m.startBalance.toLocaleString()}</td>)}
+                        </tr>
+                        <tr>
+                          <td className="row-label">Ending Balance</td>
+                          {worthData.map(m => <td key={m.month}><strong>${m.endBalance.toLocaleString()}</strong></td>)}
+                        </tr>
+                      </tbody>
+                    </table>
                   </div>
-                  <div className="glass-card">
-                    <h3 className="mb-1 text-danger">Expenses by Category</h3>
-                    <div className="category-stats">{(dashboardData?.categories?.expenses || []).map(cat => <div key={cat.cat} className="stat-row"><span>{cat.cat}</span><span className="text-danger">${cat.total.toLocaleString()}</span></div>)}</div>
+                </div>
+
+                {/* Table 2: Income Breakdown */}
+                <div className="glass-card mb-2">
+                  <h3 className="mb-1 text-success" style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}><TrendingUp size={20} /> Income Breakdown</h3>
+                  <div className="table-container">
+                    <table className="dashboard-table horizontal-table">
+                      <thead>
+                        <tr>
+                          <th className="row-label">Category</th>
+                          {worthData.map(m => (
+                            <th key={m.month} className="month-header">{m.name}</th>
+                          ))}
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {(dashboardData?.income_labels || []).filter(label =>
+                          worthData.some(m => {
+                            const md = (dashboardData?.monthly || []).find(x => x.month === m.month);
+                            return md?.income_cats?.[label] > 0;
+                          })
+                        ).map(label => (
+                          <tr key={label}>
+                            <td className="row-label">{label}</td>
+                            {worthData.map(m => {
+                              const md = (dashboardData?.monthly || []).find(x => x.month === m.month);
+                              const val = md?.income_cats?.[label] || 0;
+                              return <td key={m.month} className={val > 0 ? "text-success" : ""}>{val > 0 ? `$${val.toLocaleString()}` : '-'}</td>;
+                            })}
+                          </tr>
+                        ))}
+                        <tr className="summary-highlight-row">
+                          <td className="row-label"><strong>Total</strong></td>
+                          {worthData.map(m => <td key={m.month} className="text-success"><strong>${m.income.toLocaleString()}</strong></td>)}
+                        </tr>
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+
+                {/* Table 3: Expenses Breakdown */}
+                <div className="glass-card mb-2">
+                  <h3 className="mb-1 text-danger" style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}><BarChart3 size={20} /> Expenses Breakdown</h3>
+                  <div className="table-container">
+                    <table className="dashboard-table horizontal-table">
+                      <thead>
+                        <tr>
+                          <th className="row-label">Category</th>
+                          {worthData.map(m => (
+                            <th key={m.month} className="month-header">{m.name}</th>
+                          ))}
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {(dashboardData?.expense_labels || []).filter(label =>
+                          worthData.some(m => {
+                            const md = (dashboardData?.monthly || []).find(x => x.month === m.month);
+                            return md?.expense_cats?.[label] > 0;
+                          })
+                        ).map(label => (
+                          <tr key={label}>
+                            <td className="row-label">{label}</td>
+                            {worthData.map(m => {
+                              const md = (dashboardData?.monthly || []).find(x => x.month === m.month);
+                              const val = md?.expense_cats?.[label] || 0;
+                              return <td key={m.month} className={val > 0 ? "text-danger" : ""}>{val > 0 ? `$${val.toLocaleString()}` : '-'}</td>;
+                            })}
+                          </tr>
+                        ))}
+                        <tr className="summary-highlight-row">
+                          <td className="row-label"><strong>Total</strong></td>
+                          {worthData.map(m => <td key={m.month} className="text-danger"><strong>${m.expenses.toLocaleString()}</strong></td>)}
+                        </tr>
+                      </tbody>
+                    </table>
                   </div>
                 </div>
               </>
@@ -648,9 +817,43 @@ function App() {
                   </div>
                 </div>
 
-                <div className="summary-grid mb-2">
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1.5rem', marginBottom: '1.5rem' }}>
                   <div className="glass-card">
                     <h3 className="mb-1 text-success">Monthly Income by Category</h3>
+                    <div style={{ width: '100%', height: 240, marginBottom: '1rem' }}>
+                      <ResponsiveContainer>
+                        <PieChart>
+                          <Pie
+                            data={Object.entries(monthlyTransactions.reduce((acc, tx) => {
+                              if (Number(tx.credit) > 0 && tx.is_paired === 0) {
+                                const cat = tx.manual_category || tx.category;
+                                acc[cat] = (acc[cat] || 0) + Number(tx.credit);
+                              }
+                              return acc;
+                            }, {})).sort((a, b) => b[1] - a[1]).map(([name, value]) => ({ name, value: Math.round(value) }))}
+                            dataKey="value"
+                            nameKey="name"
+                            cx="50%"
+                            cy="50%"
+                            outerRadius={90}
+                            innerRadius={50}
+                            paddingAngle={2}
+                            strokeWidth={0}
+                          >
+                            {Object.entries(monthlyTransactions.reduce((acc, tx) => {
+                              if (Number(tx.credit) > 0 && tx.is_paired === 0) {
+                                const cat = tx.manual_category || tx.category;
+                                acc[cat] = (acc[cat] || 0) + Number(tx.credit);
+                              }
+                              return acc;
+                            }, {})).sort((a, b) => b[1] - a[1]).map((_, i) => (
+                              <Cell key={i} fill={['#10b981', '#34d399', '#6ee7b7', '#a7f3d0', '#d1fae5', '#059669', '#047857', '#065f46'][i % 8]} />
+                            ))}
+                          </Pie>
+                          <Tooltip contentStyle={{ background: 'var(--text-muted)', border: '1px solid var(--border)', borderRadius: '0.75rem', fontSize: '0.8rem', color: 'var(--text-muted)' }} />
+                        </PieChart>
+                      </ResponsiveContainer>
+                    </div>
                     <div className="category-stats">
                       {Object.entries(monthlyTransactions.reduce((acc, tx) => {
                         if (Number(tx.credit) > 0 && tx.is_paired === 0) {
@@ -673,6 +876,40 @@ function App() {
                   </div>
                   <div className="glass-card">
                     <h3 className="mb-1 text-danger">Monthly Expenses by Category</h3>
+                    <div style={{ width: '100%', height: 240, marginBottom: '1rem' }}>
+                      <ResponsiveContainer>
+                        <PieChart>
+                          <Pie
+                            data={Object.entries(monthlyTransactions.reduce((acc, tx) => {
+                              if (Number(tx.debit) > 0 && tx.is_paired === 0) {
+                                const cat = tx.manual_category || tx.category;
+                                acc[cat] = (acc[cat] || 0) + Number(tx.debit);
+                              }
+                              return acc;
+                            }, {})).sort((a, b) => b[1] - a[1]).map(([name, value]) => ({ name, value: Math.round(value) }))}
+                            dataKey="value"
+                            nameKey="name"
+                            cx="50%"
+                            cy="50%"
+                            outerRadius={90}
+                            innerRadius={50}
+                            paddingAngle={2}
+                            strokeWidth={0}
+                          >
+                            {Object.entries(monthlyTransactions.reduce((acc, tx) => {
+                              if (Number(tx.debit) > 0 && tx.is_paired === 0) {
+                                const cat = tx.manual_category || tx.category;
+                                acc[cat] = (acc[cat] || 0) + Number(tx.debit);
+                              }
+                              return acc;
+                            }, {})).sort((a, b) => b[1] - a[1]).map((_, i) => (
+                              <Cell key={i} fill={['#ef4444', '#f87171', '#fca5a5', '#fecaca', '#fee2e2', '#dc2626', '#b91c1c', '#991b1b'][i % 8]} />
+                            ))}
+                          </Pie>
+                          <Tooltip contentStyle={{ background: 'var(--text-muted)', border: '1px solid var(--border)', borderRadius: '0.75rem', fontSize: '0.8rem', color: 'var(--text-muted)' }} />
+                        </PieChart>
+                      </ResponsiveContainer>
+                    </div>
                     <div className="category-stats">
                       {Object.entries(monthlyTransactions.reduce((acc, tx) => {
                         if (Number(tx.debit) > 0 && tx.is_paired === 0) {
@@ -823,6 +1060,25 @@ function App() {
             {!processedData ? (
               <div style={{ textAlign: 'center', padding: '4rem' }}>
                 <Upload size={48} style={{ color: 'var(--primary)', marginBottom: '1rem' }} /><br />
+                <div style={{ marginBottom: '1.5rem' }}>
+                  <label style={{ fontSize: '0.85rem', color: 'var(--text-muted)', marginRight: '0.75rem' }}>Bank Profile:</label>
+                  <select
+                    className="fy-select"
+                    value={selectedBankProfile}
+                    onChange={(e) => {
+                      setSelectedBankProfile(e.target.value);
+                      // Save as default
+                      fetch(`${API_BASE}/config`).then(r => r.json()).then(cfg => {
+                        cfg.default_bank_profile = e.target.value;
+                        fetch(`${API_BASE}/config`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(cfg) });
+                      });
+                    }}
+                  >
+                    {Object.entries(bankProfiles).map(([key, profile]) => (
+                      <option key={key} value={key}>{profile.label}</option>
+                    ))}
+                  </select>
+                </div>
                 <input type="file" id="csv-upload" style={{ display: 'none' }} onChange={handleFileUpload} accept=".csv" multiple />
                 <label htmlFor="csv-upload" className="btn btn-primary" style={{ cursor: 'pointer' }}>Choose Files</label>
               </div>

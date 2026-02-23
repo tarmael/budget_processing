@@ -65,7 +65,27 @@ async def get_config():
     default_config = {
         "debit_columns": ["Date", "Description", "Category", "Title", "Debit"],
         "credit_columns": ["Date", "Description", "Category", "Title", "Credit"],
-        "duplicates_columns": ["Date", "Description", "Category", "Title", "Debit", "Credit"]
+        "duplicates_columns": ["Date", "Description", "Category", "Title", "Debit", "Credit"],
+        "fy_start_month": 7,
+        "default_bank_profile": "great_southern",
+        "bank_profiles": {
+            "great_southern": {
+                "label": "Great Southern Bank",
+                "columns": {"date": "Date", "description": "Description", "debit": "Debit", "credit": "Credit", "balance": "Balance"}
+            },
+            "cba": {
+                "label": "Commonwealth Bank (CBA)",
+                "columns": {"date": "Date", "description": "Description", "debit": "Debit", "credit": "Credit", "balance": "Balance"}
+            },
+            "westpac": {
+                "label": "Westpac",
+                "columns": {"date": "Date", "description": "Narrative", "debit": "Debit Amount", "credit": "Credit Amount", "balance": "Balance"}
+            },
+            "anz": {
+                "label": "ANZ",
+                "columns": {"date": "Date", "description": "Details", "debit": "Debit", "credit": "Credit", "balance": "Balance"}
+            }
+        }
     }
     if not os.path.exists(CONFIG_FILE):
         return default_config
@@ -83,7 +103,7 @@ async def save_config(data: Dict[str, Any]):
     return {"status": "success"}
 
 @app.post("/api/process")
-async def process_statement(files: List[UploadFile] = File(...)):
+async def process_statement(files: List[UploadFile] = File(...), bank_profile: str = None):
     temp_inputs = []
     for file in files:
         temp_input = f"temp_{file.filename}"
@@ -91,12 +111,20 @@ async def process_statement(files: List[UploadFile] = File(...)):
             shutil.copyfileobj(file.file, buffer)
         temp_inputs.append(temp_input)
     
+    # Resolve bank profile column mapping
+    column_mapping = None
+    if bank_profile:
+        config = await get_config()
+        profiles = config.get("bank_profiles", {})
+        if bank_profile in profiles:
+            column_mapping = profiles[bank_profile].get("columns")
+    
     # We use the first filename as a base or just 'combined'
     output_base = "combined" if len(temp_inputs) > 1 else temp_inputs[0].replace(".csv", "")
     
     try:
         # results = debits + credits (categorized)
-        results, unmatched, duplicates = process.process_csv(temp_inputs, output_base, CATEGORIES_FILE, CONFIG_FILE)
+        results, unmatched, duplicates = process.process_csv(temp_inputs, output_base, CATEGORIES_FILE, CONFIG_FILE, column_mapping)
             
         return {
             "results": results,

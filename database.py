@@ -235,52 +235,54 @@ def get_balance_anchors():
     return anchors
 
 def get_dashboard_data():
-    """Aggregate data for the dashboard view."""
+    """Aggregate data for the dashboard view with monthly categorical breakdowns."""
     conn = get_db_connection()
     cursor = conn.cursor()
     
-    # 1. Monthly Summaries (filtering out paired transfers from spending totals)
+    # 1. Get all unique months from transactions
+    cursor.execute("SELECT DISTINCT strftime('%Y-%m', date) as month FROM transactions ORDER BY month DESC")
+    months = [row['month'] for row in cursor.fetchall()]
+    
+    # 2. Get categorical breakdowns for each month
+    # We query specific category totals per month to build the horizontal tables
     cursor.execute('''
         SELECT 
             strftime('%Y-%m', date) as month,
-            SUM(CASE WHEN credit > 0 AND is_paired = 0 THEN credit ELSE 0 END) as income,
-            SUM(CASE WHEN debit > 0 AND is_paired = 0 THEN debit ELSE 0 END) as expenses
-        FROM transactions
-        GROUP BY month
-        ORDER BY month DESC
-    ''')
-    monthly_stats = [dict(row) for row in cursor.fetchall()]
-    
-    # Category totals across all time
-    cursor.execute('''
-        SELECT 
             COALESCE(manual_category, category) as cat,
-            SUM(credit) as total
+            SUM(credit) as total_credit,
+            SUM(debit) as total_debit
         FROM transactions
-        WHERE credit > 0 AND is_paired = 0
-        GROUP BY cat
-        ORDER BY total DESC
+        WHERE is_paired = 0
+        GROUP BY month, cat
     ''')
-    income_by_cat = [dict(row) for row in cursor.fetchall()]
+    raw_data = cursor.fetchall()
     
-    cursor.execute('''
-        SELECT 
-            COALESCE(manual_category, category) as cat,
-            SUM(debit) as total
-        FROM transactions
-        WHERE debit > 0 AND is_paired = 0
-        GROUP BY cat
-        ORDER BY total DESC
-    ''')
-    expense_by_cat = [dict(row) for row in cursor.fetchall()]
+    monthly_map = {m: {"month": m, "income": 0, "expenses": 0, "income_cats": {}, "expense_cats": {}} for m in months}
+    income_labels = set()
+    expense_labels = set()
     
+    for row in raw_data:
+        m = row['month']
+        cat = row['cat']
+        ic = row['total_credit'] or 0
+        ec = row['total_debit'] or 0
+        
+        if ic > 0:
+            monthly_map[m]["income"] += ic
+            monthly_map[m]["income_cats"][cat] = ic
+            income_labels.add(cat)
+        if ec > 0:
+            monthly_map[m]["expenses"] += ec
+            monthly_map[m]["expense_cats"][cat] = ec
+            expense_labels.add(cat)
+            
     conn.close()
+    
     return {
-        "monthly": monthly_stats,
-        "categories": {
-            "income": income_by_cat,
-            "expenses": expense_by_cat
-        }
+        "months": months,
+        "monthly": list(monthly_map.values()),
+        "income_labels": sorted(list(income_labels)),
+        "expense_labels": sorted(list(expense_labels))
     }
 
 def get_transactions_for_month(month_str):
