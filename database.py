@@ -203,14 +203,21 @@ def sync_categories(get_match_func, categories_data):
     return updates
 
 def set_manual_override(transaction_id, category, title):
-    """Manually set a category, marking it as locked."""
+    """Manually set a category, marking it as locked. If category is empty, resets to auto-matched."""
     conn = get_db_connection()
     cursor = conn.cursor()
-    cursor.execute('''
-        UPDATE transactions 
-        SET manual_category = ?, manual_title = ?, is_manual = 1 
-        WHERE id = ?
-    ''', (category, title, transaction_id))
+    if not category:
+        cursor.execute('''
+            UPDATE transactions 
+            SET manual_category = NULL, manual_title = NULL, is_manual = 0 
+            WHERE id = ?
+        ''', (transaction_id,))
+    else:
+        cursor.execute('''
+            UPDATE transactions 
+            SET manual_category = ?, manual_title = ?, is_manual = 1 
+            WHERE id = ?
+        ''', (category, title, transaction_id))
     conn.commit()
     conn.close()
 

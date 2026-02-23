@@ -19,9 +19,6 @@ The processor generates several specialized CSV files sorted by date:
 3. `.duplicates.csv`: Paired internal transfers removed from the main ledger.
 4. `.NO_CATEGORY.csv`: A side-car file containing only the transactions that requires manual pattern assignment.
 
-### Roadmap
-1. [Next Step: Multi-Bank Support & Mapping]
-2. [Next Step: Multi-Currency Support]
 
 ### Dashboard & Visualizer
 
@@ -55,3 +52,14 @@ The processor generates several specialized CSV files sorted by date:
 - **Manual Overrides**: Include a `Locked` or `IsManual` flag. If a user manually corrects a category in the future UI, that transaction should not be overwritten by subsequent automated processing.
 - **Category Sync**: Ensure that when `categories.json` is updated, any "unlocked" transaction in the database is re-categorized to reflect the new rules.
 - **Automation**: Ensure newly added transactions are added to the database automatically during processing.
+
+
+### Roadmap
+1. Yearly Overview / Multi-Year Comparison
+You now have FY filtering, but there's no side-by-side FY comparison view (e.g. "How does FY 2024/25 spending compare to FY 2025/26?"). A year-over-year trend would be powerful.
+2. Budget Targets / Alerts
+There's no way to set a spending target per category (e.g. "Groceries: $600/month") and see whether you're on track or over.
+3. Recurring Transaction Detection
+The system doesn't identify recurring transactions (rent, salary, subscriptions). Flagging "this $X charge appears every month" would help with budgeting predictions and spotting missed payments.
+6. Undo for Manual Overrides & Deletions
+Once you delete a transaction, there's no way to undo it.

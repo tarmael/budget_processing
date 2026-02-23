@@ -74,6 +74,17 @@ def process_csv(input_paths, output_base, categories_path, config_path=None, col
     for path in input_paths:
         with open(path, 'r', newline='') as csvfile:
             reader = csv.DictReader(csvfile)
+            
+            # Header validation to prevent bank profile mismatch
+            actual_headers = reader.fieldnames or []
+            required_keys = ['date', 'description', 'debit', 'credit']
+            expected_headers = [col_map[k] for k in required_keys]
+            missing_headers = [h for h in expected_headers if h not in actual_headers]
+            
+            if missing_headers:
+                filename = os.path.basename(path)
+                raise ValueError(f"Bank profile mismatch for {filename}. Missing expected columns: {', '.join(missing_headers)}. Please ensure you selected the correct Bank Profile.")
+            
             for row in reader:
                 # Map bank-specific columns to standard schema
                 description = str(row.get(col_map['description'], '') or '').strip()

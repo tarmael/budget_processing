@@ -31,6 +31,10 @@ function App() {
   const [newAnchor, setNewAnchor] = useState({ date: '', balance: '' });
   const [selectedDrillDownCategory, setSelectedDrillDownCategory] = useState(null);
 
+  const [ledgerSearch, setLedgerSearch] = useState('');
+  const [ledgerCategoryFilter, setLedgerCategoryFilter] = useState('');
+  const [ledgerAmountFilter, setLedgerAmountFilter] = useState('all');
+
   const [currentFile, setCurrentFile] = useState(null);
   const [selectedBankProfile, setSelectedBankProfile] = useState('great_southern');
   const [bankProfiles, setBankProfiles] = useState({});
@@ -472,6 +476,53 @@ function App() {
 
   const worthData = getWorthData();
 
+  const exportDashboardCSV = () => {
+    if (!dashboardData || !selectedFY) return;
+    const fyLabel = getFYLabel(selectedFY, fyStartMonth);
+
+    let csvContent = "Month,Start Balance,Income,Expenses,End Balance\n";
+    worthData.forEach(row => {
+      csvContent += `${row.name},${row.startBalance},${row.income},${row.expenses},${row.endBalance}\n`;
+    });
+
+    csvContent += "\n\nIncome by Category\nCategory";
+    worthData.forEach(row => csvContent += `,${row.name}`);
+    csvContent += "\n";
+
+    const incomeLabels = (dashboardData.income_labels || []).filter(label => worthData.some(m => ((dashboardData.monthly || []).find(x => x.month === m.month) || {}).income_cats?.[label] > 0));
+    incomeLabels.forEach(label => {
+      csvContent += `${label}`;
+      worthData.forEach(m => {
+        const md = (dashboardData.monthly || []).find(x => x.month === m.month);
+        csvContent += `,${md?.income_cats?.[label] || 0}`;
+      });
+      csvContent += "\n";
+    });
+
+    csvContent += "\n\nExpenses by Category\nCategory";
+    worthData.forEach(row => csvContent += `,${row.name}`);
+    csvContent += "\n";
+
+    const expenseLabels = (dashboardData.expense_labels || []).filter(label => worthData.some(m => ((dashboardData.monthly || []).find(x => x.month === m.month) || {}).expense_cats?.[label] > 0));
+    expenseLabels.forEach(label => {
+      csvContent += `${label}`;
+      worthData.forEach(m => {
+        const md = (dashboardData.monthly || []).find(x => x.month === m.month);
+        csvContent += `,${md?.expense_cats?.[label] || 0}`;
+      });
+      csvContent += "\n";
+    });
+
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.setAttribute("href", url);
+    link.setAttribute("download", `budget_report_FY${fyLabel.replace('/', '-')}.csv`);
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  };
+
   return (
     <div className="app-container">
       <header>
@@ -648,6 +699,7 @@ function App() {
                       </select>
                     )}
                     <button className="btn btn-ghost" onClick={() => setIsAddingAnchor(true)}><Wallet size={18} /> Balance Anchor</button>
+                    <button className="btn btn-primary" onClick={exportDashboardCSV}><Download size={18} /> Export CSV</button>
                   </div>
                 </div>
 
@@ -998,8 +1050,39 @@ function App() {
                 </AnimatePresence>
 
                 <div className="glass-card">
-                  <div style={{ padding: '1rem 0', borderBottom: '1px solid var(--border)', marginBottom: '1rem' }}>
-                    <h3 style={{ opacity: 0.6 }}>Full Ledger</h3>
+                  <div style={{ padding: '1rem 0', borderBottom: '1px solid var(--border)', marginBottom: '1rem', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '1rem' }}>
+                    <h3 style={{ opacity: 0.6, margin: 0 }}>Full Ledger</h3>
+                    <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
+                      <div style={{ position: 'relative' }}>
+                        <Search style={{ position: 'absolute', left: '0.5rem', top: '50%', transform: 'translateY(-50%)', color: 'var(--text-muted)' }} size={16} />
+                        <input
+                          placeholder="Search description..."
+                          value={ledgerSearch}
+                          onChange={e => setLedgerSearch(e.target.value)}
+                          style={{ padding: '0.5rem 0.5rem 0.5rem 2rem', width: '200px', borderRadius: '0.25rem', border: '1px solid var(--border)', background: 'rgba(0,0,0,0.2)' }}
+                        />
+                      </div>
+                      <select
+                        value={ledgerCategoryFilter}
+                        onChange={e => setLedgerCategoryFilter(e.target.value)}
+                        className="fy-select"
+                        style={{ padding: '0.5rem' }}
+                      >
+                        <option value="">All Categories</option>
+                        {categories.map(c => <option key={c.name} value={c.name}>{c.name}</option>)}
+                        <option value="UNMATCHED">UNMATCHED</option>
+                      </select>
+                      <select
+                        value={ledgerAmountFilter}
+                        onChange={e => setLedgerAmountFilter(e.target.value)}
+                        className="fy-select"
+                        style={{ padding: '0.5rem' }}
+                      >
+                        <option value="all">All Amounts</option>
+                        <option value="income">Income Only</option>
+                        <option value="expense">Expenses Only</option>
+                      </select>
+                    </div>
                   </div>
                   <div className="table-container">
                     <table>
@@ -1014,7 +1097,14 @@ function App() {
                         </tr>
                       </thead>
                       <tbody>
-                        {monthlyTransactions.map((tx) => (
+                        {monthlyTransactions.filter(tx => {
+                          if (ledgerSearch && !tx.description.toLowerCase().includes(ledgerSearch.toLowerCase())) return false;
+                          const cat = tx.manual_category || tx.category;
+                          if (ledgerCategoryFilter && cat !== ledgerCategoryFilter) return false;
+                          if (ledgerAmountFilter === 'income' && !(Number(tx.credit) > 0)) return false;
+                          if (ledgerAmountFilter === 'expense' && !(Number(tx.debit) > 0)) return false;
+                          return true;
+                        }).map((tx) => (
                           <tr key={tx.id}>
                             <td>{tx.date}</td>
                             <td>{tx.description}</td>
