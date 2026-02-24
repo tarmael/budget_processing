@@ -16,6 +16,11 @@ load_dotenv()
 
 app = FastAPI()
 
+@app.on_event("startup")
+async def startup_event():
+    print("INFO: Initializing database on startup...")
+    database.init_db()
+
 # Mount frontend build directory (created via npm run build)
 frontend_dist = "frontend/dist"
 if os.path.exists(frontend_dist):
@@ -173,6 +178,21 @@ async def get_balance_anchors():
 async def delete_transaction(transaction_id: int):
     database.delete_transaction(transaction_id)
     return {"status": "success"}
+
+@app.get("/api/budget_targets")
+async def get_budget_targets():
+    return database.get_budget_targets()
+
+@app.post("/api/budget_targets")
+async def save_budget_target(data: Dict[str, Any]):
+    # Expects: { "category": "Groceries", "target": 600.0 }
+    database.set_budget_target(data['category'], data['target'])
+    return {"status": "success"}
+
+@app.get("/api/recurring_transactions")
+async def get_recurring_transactions():
+    return database.get_recurring_transactions()
+
 
 if __name__ == "__main__":
     import uvicorn

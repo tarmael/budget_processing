@@ -66,6 +66,12 @@ def init_db():
             balance REAL NOT NULL
         )
     ''')
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS budget_targets (
+            category TEXT PRIMARY KEY,
+            target REAL NOT NULL
+        )
+    ''')
     conn.commit()
     conn.close()
 
@@ -312,3 +318,95 @@ def delete_transaction(transaction_id):
     cursor.execute("DELETE FROM transactions WHERE id = ?", (transaction_id,))
     conn.commit()
     conn.close()
+
+def get_budget_targets():
+    """Retrieve all budget targets."""
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    try:
+        cursor.execute("SELECT category, target FROM budget_targets")
+        targets = {row['category']: row['target'] for row in cursor.fetchall()}
+    except sqlite3.OperationalError:
+        targets = {}
+    conn.close()
+    return targets
+
+def set_budget_target(category, target):
+    """Set or update a budget target for a category."""
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    try:
+        cursor.execute('''
+            INSERT OR REPLACE INTO budget_targets (category, target) 
+            VALUES (?, ?)
+        ''', (category, float(target)))
+    except sqlite3.OperationalError:
+        init_db()
+        cursor.execute('''
+            INSERT OR REPLACE INTO budget_targets (category, target) 
+            VALUES (?, ?)
+        ''', (category, float(target)))
+    conn.commit()
+    conn.close()
+
+def get_recurring_transactions():
+    """
+    Identify potential recurring transactions.
+    Finds transactions with the same combination of title, type (debit/credit),
+    and very similar amounts across at least 2 distinct months.
+    """
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    
+    # We group by COALESCE(manual_title, title), COALESCE(manual_category, category),
+    # and find things that appear in > 1 distinct month.
+    try:
+        cursor.execute('''
+            SELECT 
+                COALESCE(manual_title, title) as display_title,
+                COALESCE(manual_category, category) as display_cat,
+                CASE WHEN debit > 0 THEN 'expense' ELSE 'income' END as type,
+                GROUP_CONCAT(CASE WHEN debit > 0 THEN debit ELSE credit END) as amounts,
+                ROUND(AVG(CASE WHEN debit > 0 THEN debit ELSE credit END), 2) as avg_amount,
+                MAX(CASE WHEN debit > 0 THEN debit ELSE credit END) as max_amount,
+                MIN(CASE WHEN debit > 0 THEN debit ELSE credit END) as min_amount,
+                COUNT(id) as count,
+                COUNT(DISTINCT strftime('%Y-%m', date)) as months_count,
+                MAX(date) as last_seen,
+                MIN(date) as first_seen
+            FROM transactions
+            WHERE is_paired = 0 AND title != 'UNMATCHED' AND title != ''
+            GROUP BY display_title, display_cat, type
+            HAVING count >= 3 AND months_count >= 3
+        ''')
+        rows = cursor.fetchall()
+    except sqlite3.OperationalError:
+        rows = []
+    
+    potential_recurring = []
+    for row in rows:
+        r = dict(row)
+        # Check if the variance in amount is not too large (e.g. max differs from min by <= 15%)
+        # Rent/Salary can vary slightly, so we allow a bit of wiggle room.
+        max_a = r['max_amount']
+        min_a = r['min_amount']
+        avg_a = r['avg_amount']
+        if max_a == 0 or avg_a == 0: continue
+        
+        amounts_list = sorted([float(x) for x in r['amounts'].split(',') if x.strip()])
+        n = len(amounts_list)
+        if n % 2 == 0:
+            median_a = (amounts_list[n//2 - 1] + amounts_list[n//2]) / 2.0
+        else:
+            median_a = amounts_list[n//2]
+        r['median_amount'] = round(median_a, 2)
+        
+        # If the max is within 20% of the average, we call it recurring
+        if (max_a - min_a) / avg_a <= 0.20:
+            potential_recurring.append(r)
+            
+    # Sort by amount descending
+    potential_recurring.sort(key=lambda x: x['median_amount'], reverse=True)
+    
+    conn.close()
+    return potential_recurring

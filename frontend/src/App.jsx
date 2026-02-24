@@ -21,7 +21,10 @@ function App() {
 
   // Dashboard State
   const [dashboardData, setDashboardData] = useState(null);
+  const [budgetTargets, setBudgetTargets] = useState({});
+  const [recurringTransactions, setRecurringTransactions] = useState([]);
   const [selectedMonth, setSelectedMonth] = useState(null);
+  const [dashboardMode, setDashboardMode] = useState('monthly'); // 'monthly' | 'yearly'
   const [monthlyTransactions, setMonthlyTransactions] = useState([]);
   const [selectedFY, setSelectedFY] = useState(null); // Will be set once fyStartMonth loads
   const [fyStartMonth, setFyStartMonth] = useState(7); // Default Aus FY, updated from config
@@ -181,11 +184,31 @@ function App() {
 
   const fetchDashboardData = async () => {
     try {
-      const res = await fetch(`${API_BASE}/dashboard`);
-      const data = await res.json();
+      const [dashRes, targetsRes, recurringRes] = await Promise.all([
+        fetch(`${API_BASE}/dashboard`),
+        fetch(`${API_BASE}/budget_targets`),
+        fetch(`${API_BASE}/recurring_transactions`)
+      ]);
+      const data = await dashRes.json();
       setDashboardData(data);
+      setBudgetTargets(await targetsRes.json());
+      setRecurringTransactions(await recurringRes.json());
     } catch (err) {
       showMessage("Failed to fetch dashboard data", "error");
+    }
+  };
+
+  const updateBudgetTarget = async (category, target) => {
+    try {
+      await fetch(`${API_BASE}/budget_targets`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ category, target })
+      });
+      setBudgetTargets(prev => ({ ...prev, [category]: target }));
+      showMessage("Target updated", "success");
+    } catch (err) {
+      showMessage("Failed to save target", "error");
     }
   };
 
@@ -476,6 +499,51 @@ function App() {
 
   const worthData = getWorthData();
 
+  const getYearlyData = () => {
+    if (!dashboardData?.monthly) return [];
+    const sortedMonthly = [...dashboardData.monthly].sort((a, b) => a.month.localeCompare(b.month));
+
+    let runningBalance = balanceAnchors.length > 0 ? [...balanceAnchors].sort((a, b) => a.date.localeCompare(b.date))[0].balance : 0;
+
+    const fyMap = {};
+    sortedMonthly.forEach(m => {
+      const parts = m.month.split('-');
+      const date = new Date(parseInt(parts[0]), parseInt(parts[1]) - 1, 1);
+      const fy = getFYForDate(date, fyStartMonth);
+      const startBal = runningBalance;
+      runningBalance += (m.income - m.expenses);
+
+      if (!fyMap[fy]) {
+        fyMap[fy] = {
+          fy,
+          name: getFYLabel(fy, fyStartMonth),
+          income: 0,
+          expenses: 0,
+          startBalance: startBal,
+          endBalance: runningBalance,
+          income_cats: {},
+          expense_cats: {},
+          hasStartBalanceSet: true
+        };
+      }
+
+      fyMap[fy].income += m.income;
+      fyMap[fy].expenses += m.expenses;
+      fyMap[fy].endBalance = runningBalance; // Update to the latest end balance
+
+      Object.entries(m.income_cats || {}).forEach(([cat, val]) => {
+        fyMap[fy].income_cats[cat] = (fyMap[fy].income_cats[cat] || 0) + val;
+      });
+      Object.entries(m.expense_cats || {}).forEach(([cat, val]) => {
+        fyMap[fy].expense_cats[cat] = (fyMap[fy].expense_cats[cat] || 0) + val;
+      });
+    });
+
+    return Object.values(fyMap).sort((a, b) => a.fy - b.fy);
+  };
+
+  const yearlyData = getYearlyData();
+
   const exportDashboardCSV = () => {
     if (!dashboardData || !selectedFY) return;
     const fyLabel = getFYLabel(selectedFY, fyStartMonth);
@@ -698,169 +766,352 @@ function App() {
                         ))}
                       </select>
                     )}
+                    <div style={{ display: 'flex', background: 'rgba(0,0,0,0.2)', padding: '0.2rem', borderRadius: '0.5rem' }}>
+                      <button className={`btn btn-sm ${dashboardMode === 'monthly' ? 'btn-primary' : 'btn-ghost'}`} onClick={() => setDashboardMode('monthly')}>Monthly FY</button>
+                      <button className={`btn btn-sm ${dashboardMode === 'yearly' ? 'btn-primary' : 'btn-ghost'}`} onClick={() => setDashboardMode('yearly')}>Yearly Comparison</button>
+                    </div>
                     <button className="btn btn-ghost" onClick={() => setIsAddingAnchor(true)}><Wallet size={18} /> Balance Anchor</button>
                     <button className="btn btn-primary" onClick={exportDashboardCSV}><Download size={18} /> Export CSV</button>
                   </div>
                 </div>
 
-                {/* Charts */}
-                <div className="glass-card mb-2" style={{ minHeight: '400px' }}>
-                  <h3 style={{ marginBottom: '1.5rem', display: 'flex', alignItems: 'center', gap: '0.5rem' }}><TrendingUp size={20} className="text-primary" /> Financial Performance</h3>
-                  <div style={{ width: '100%', height: 320 }}>
-                    <ResponsiveContainer>
-                      <ComposedChart data={worthData}>
-                        <defs>
-                          <linearGradient id="colorWorth" x1="0" y1="0" x2="0" y2="1">
-                            <stop offset="5%" stopColor="var(--primary)" stopOpacity={0.3} /><stop offset="95%" stopColor="var(--primary)" stopOpacity={0} />
-                          </linearGradient>
-                          <linearGradient id="colorIncome" x1="0" y1="0" x2="0" y2="1">
-                            <stop offset="5%" stopColor="var(--success)" stopOpacity={0.2} /><stop offset="95%" stopColor="var(--success)" stopOpacity={0} />
-                          </linearGradient>
-                          <linearGradient id="colorExpenses" x1="0" y1="0" x2="0" y2="1">
-                            <stop offset="5%" stopColor="var(--danger)" stopOpacity={0.2} /><stop offset="95%" stopColor="var(--danger)" stopOpacity={0} />
-                          </linearGradient>
-                          <linearGradient id="colorStart" x1="0" y1="0" x2="0" y2="1">
-                            <stop offset="5%" stopColor="rgba(255,255,255,0.4)" stopOpacity={0.1} /><stop offset="95%" stopColor="rgba(255,255,255,0.4)" stopOpacity={0} />
-                          </linearGradient>
-                        </defs>
-                        <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.05)" vertical={false} />
-                        <XAxis dataKey="name" stroke="var(--text-muted)" fontSize={12} tickLine={false} axisLine={false} />
-                        <YAxis yAxisId="left" stroke="var(--text-muted)" fontSize={12} tickLine={false} axisLine={false} tickFormatter={(val) => `$${val}`} />
-                        <YAxis yAxisId="right" orientation="right" stroke="var(--primary)" fontSize={12} tickLine={false} axisLine={false} tickFormatter={(val) => `$${val}`} />
-                        <Tooltip content={<CustomTrendTooltip />} />
-                        <Legend verticalAlign="top" height={36} />
-                        <Area yAxisId="left" type="monotone" dataKey="income" name="Monthly Income" stroke="var(--success)" strokeWidth={2} fillOpacity={1} fill="url(#colorIncome)" />
-                        <Area yAxisId="left" type="monotone" dataKey="expenses" name="Monthly Expenses" stroke="var(--danger)" strokeWidth={2} fillOpacity={1} fill="url(#colorExpenses)" />
-                        <Area yAxisId="right" type="monotone" dataKey="startBalance" name="Starting Balance" stroke="rgba(255,255,255,0.4)" strokeDasharray="5 5" strokeWidth={2} fillOpacity={1} fill="url(#colorStart)" />
-                        <Area yAxisId="right" type="monotone" dataKey="worth" name="Net Worth (End)" stroke="var(--primary)" strokeWidth={3} fillOpacity={1} fill="url(#colorWorth)" />
-                      </ComposedChart>
-                    </ResponsiveContainer>
-                  </div>
-                </div>
+                {dashboardMode === 'yearly' ? (
+                  <>
+                    <div className="glass-card mb-2" style={{ minHeight: '400px' }}>
+                      <h3 style={{ marginBottom: '1.5rem', display: 'flex', alignItems: 'center', gap: '0.5rem' }}><TrendingUp size={20} className="text-primary" /> Multi-Year Performance</h3>
+                      <div style={{ width: '100%', height: 320 }}>
+                        <ResponsiveContainer>
+                          <BarChart data={yearlyData}>
+                            <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.05)" vertical={false} />
+                            <XAxis dataKey="name" stroke="var(--text-muted)" fontSize={12} tickLine={false} axisLine={false} />
+                            <YAxis stroke="var(--text-muted)" fontSize={12} tickLine={false} axisLine={false} tickFormatter={(val) => `$${val}`} />
+                            <Tooltip contentStyle={{ background: 'var(--bg)', border: '1px solid var(--border)' }} />
+                            <Legend verticalAlign="top" height={36} />
+                            <Bar dataKey="income" name="Income" fill="var(--success)" radius={[4, 4, 0, 0]} />
+                            <Bar dataKey="expenses" name="Expenses" fill="var(--danger)" radius={[4, 4, 0, 0]} />
+                          </BarChart>
+                        </ResponsiveContainer>
+                      </div>
+                    </div>
 
-                {/* Table 1: Summary */}
-                <div className="glass-card mb-2">
-                  <h3 className="mb-1" style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}><BarChart3 size={20} className="text-primary" /> Summary</h3>
-                  <div className="table-container">
-                    <table className="dashboard-table horizontal-table">
-                      <thead>
-                        <tr>
-                          <th className="row-label"></th>
-                          {worthData.map(m => (
-                            <th key={m.month} className="month-header" style={{ cursor: 'pointer' }} onClick={() => fetchMonthTransactions(m.month)}>
-                              {m.name}
-                            </th>
-                          ))}
-                        </tr>
-                      </thead>
-                      <tbody>
-                        <tr>
-                          <td className="row-label">Income</td>
-                          {worthData.map(m => <td key={m.month} className="text-success">${m.income.toLocaleString()}</td>)}
-                        </tr>
-                        <tr>
-                          <td className="row-label">Expenses</td>
-                          {worthData.map(m => <td key={m.month} className="text-danger">${m.expenses.toLocaleString()}</td>)}
-                        </tr>
-                        <tr className="summary-highlight-row">
-                          <td className="row-label"><strong>Net Savings</strong></td>
-                          {worthData.map(m => {
-                            const net = m.income - m.expenses;
-                            return <td key={m.month} className={net >= 0 ? "text-success" : "text-danger"}><strong>${net.toLocaleString()}</strong></td>;
-                          })}
-                        </tr>
-                        <tr>
-                          <td className="row-label">Starting Balance</td>
-                          {worthData.map(m => <td key={m.month}>${m.startBalance.toLocaleString()}</td>)}
-                        </tr>
-                        <tr>
-                          <td className="row-label">Ending Balance</td>
-                          {worthData.map(m => <td key={m.month}><strong>${m.endBalance.toLocaleString()}</strong></td>)}
-                        </tr>
-                      </tbody>
-                    </table>
-                  </div>
-                </div>
-
-                {/* Table 2: Income Breakdown */}
-                <div className="glass-card mb-2">
-                  <h3 className="mb-1 text-success" style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}><TrendingUp size={20} /> Income Breakdown</h3>
-                  <div className="table-container">
-                    <table className="dashboard-table horizontal-table">
-                      <thead>
-                        <tr>
-                          <th className="row-label">Category</th>
-                          {worthData.map(m => (
-                            <th key={m.month} className="month-header">{m.name}</th>
-                          ))}
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {(dashboardData?.income_labels || []).filter(label =>
-                          worthData.some(m => {
-                            const md = (dashboardData?.monthly || []).find(x => x.month === m.month);
-                            return md?.income_cats?.[label] > 0;
-                          })
-                        ).map(label => (
-                          <tr key={label}>
-                            <td className="row-label">{label}</td>
-                            {worthData.map(m => {
-                              const md = (dashboardData?.monthly || []).find(x => x.month === m.month);
-                              const val = md?.income_cats?.[label] || 0;
-                              return <td key={m.month} className={val > 0 ? "text-success" : ""}>{val > 0 ? `$${val.toLocaleString()}` : '-'}</td>;
+                    <div className="glass-card mb-2">
+                      <h3 className="mb-1 text-success" style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}><TrendingUp size={20} /> Income Comparison</h3>
+                      <div className="table-container">
+                        <table className="dashboard-table horizontal-table">
+                          <thead>
+                            <tr>
+                              <th className="row-label">Category</th>
+                              {yearlyData.map(y => <th key={y.fy} className="month-header">{y.name}</th>)}
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {(dashboardData?.income_labels || []).map(label => {
+                              const vals = yearlyData.map(y => y.income_cats[label] || 0);
+                              if (vals.every(v => v === 0)) return null;
+                              return (
+                                <tr key={label}>
+                                  <td className="row-label">{label}</td>
+                                  {yearlyData.map(y => {
+                                    const val = y.income_cats[label] || 0;
+                                    return <td key={y.fy} className={val > 0 ? "text-success" : ""}>{val > 0 ? `$${val.toLocaleString()}` : '-'}</td>;
+                                  })}
+                                </tr>
+                              );
                             })}
-                          </tr>
-                        ))}
-                        <tr className="summary-highlight-row">
-                          <td className="row-label"><strong>Total</strong></td>
-                          {worthData.map(m => <td key={m.month} className="text-success"><strong>${m.income.toLocaleString()}</strong></td>)}
-                        </tr>
-                      </tbody>
-                    </table>
-                  </div>
-                </div>
+                            <tr className="summary-highlight-row">
+                              <td className="row-label"><strong>Total Income</strong></td>
+                              {yearlyData.map(y => <td key={y.fy} className="text-success"><strong>${y.income.toLocaleString()}</strong></td>)}
+                            </tr>
+                          </tbody>
+                        </table>
+                      </div>
+                    </div>
 
-                {/* Table 3: Expenses Breakdown */}
-                <div className="glass-card mb-2">
-                  <h3 className="mb-1 text-danger" style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}><BarChart3 size={20} /> Expenses Breakdown</h3>
-                  <div className="table-container">
-                    <table className="dashboard-table horizontal-table">
-                      <thead>
-                        <tr>
-                          <th className="row-label">Category</th>
-                          {worthData.map(m => (
-                            <th key={m.month} className="month-header">{m.name}</th>
-                          ))}
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {(dashboardData?.expense_labels || []).filter(label =>
-                          worthData.some(m => {
-                            const md = (dashboardData?.monthly || []).find(x => x.month === m.month);
-                            return md?.expense_cats?.[label] > 0;
-                          })
-                        ).map(label => (
-                          <tr key={label}>
-                            <td className="row-label">{label}</td>
-                            {worthData.map(m => {
-                              const md = (dashboardData?.monthly || []).find(x => x.month === m.month);
-                              const val = md?.expense_cats?.[label] || 0;
-                              return <td key={m.month} className={val > 0 ? "text-danger" : ""}>{val > 0 ? `$${val.toLocaleString()}` : '-'}</td>;
+                    <div className="glass-card mb-2">
+                      <h3 className="mb-1 text-danger" style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}><BarChart3 size={20} /> Expenses Comparison</h3>
+                      <div className="table-container">
+                        <table className="dashboard-table horizontal-table">
+                          <thead>
+                            <tr>
+                              <th className="row-label">Category</th>
+                              {yearlyData.map(y => <th key={y.fy} className="month-header">{y.name}</th>)}
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {(dashboardData?.expense_labels || []).map(label => {
+                              const vals = yearlyData.map(y => y.expense_cats[label] || 0);
+                              if (vals.every(v => v === 0)) return null;
+                              return (
+                                <tr key={label}>
+                                  <td className="row-label">{label}</td>
+                                  {yearlyData.map(y => {
+                                    const val = y.expense_cats[label] || 0;
+                                    return <td key={y.fy} className={val > 0 ? "text-danger" : ""}>{val > 0 ? `$${val.toLocaleString()}` : '-'}</td>;
+                                  })}
+                                </tr>
+                              );
                             })}
-                          </tr>
-                        ))}
-                        <tr className="summary-highlight-row">
-                          <td className="row-label"><strong>Total</strong></td>
-                          {worthData.map(m => <td key={m.month} className="text-danger"><strong>${m.expenses.toLocaleString()}</strong></td>)}
-                        </tr>
-                      </tbody>
-                    </table>
-                  </div>
-                </div>
+                            <tr className="summary-highlight-row">
+                              <td className="row-label"><strong>Total Expenses</strong></td>
+                              {yearlyData.map(y => <td key={y.fy} className="text-danger"><strong>${y.expenses.toLocaleString()}</strong></td>)}
+                            </tr>
+                            <tr className="summary-highlight-row" style={{ borderTop: '2px solid var(--border)' }}>
+                              <td className="row-label"><strong>Net Savings</strong></td>
+                              {yearlyData.map(y => {
+                                const net = y.income - y.expenses;
+                                return <td key={y.fy} className={net >= 0 ? "text-success" : "text-danger"}><strong>${net.toLocaleString()}</strong></td>;
+                              })}
+                            </tr>
+                          </tbody>
+                        </table>
+                      </div>
+                    </div>
+                  </>
+                ) : (
+                  <>
+
+                    {/* Charts */}
+                    <div className="glass-card mb-2" style={{ minHeight: '400px' }}>
+                      <h3 style={{ marginBottom: '1.5rem', display: 'flex', alignItems: 'center', gap: '0.5rem' }}><TrendingUp size={20} className="text-primary" /> Financial Performance</h3>
+                      <div style={{ width: '100%', height: 320 }}>
+                        <ResponsiveContainer>
+                          <ComposedChart data={worthData}>
+                            <defs>
+                              <linearGradient id="colorWorth" x1="0" y1="0" x2="0" y2="1">
+                                <stop offset="5%" stopColor="var(--primary)" stopOpacity={0.3} /><stop offset="95%" stopColor="var(--primary)" stopOpacity={0} />
+                              </linearGradient>
+                              <linearGradient id="colorIncome" x1="0" y1="0" x2="0" y2="1">
+                                <stop offset="5%" stopColor="var(--success)" stopOpacity={0.2} /><stop offset="95%" stopColor="var(--success)" stopOpacity={0} />
+                              </linearGradient>
+                              <linearGradient id="colorExpenses" x1="0" y1="0" x2="0" y2="1">
+                                <stop offset="5%" stopColor="var(--danger)" stopOpacity={0.2} /><stop offset="95%" stopColor="var(--danger)" stopOpacity={0} />
+                              </linearGradient>
+                              <linearGradient id="colorStart" x1="0" y1="0" x2="0" y2="1">
+                                <stop offset="5%" stopColor="rgba(255,255,255,0.4)" stopOpacity={0.1} /><stop offset="95%" stopColor="rgba(255,255,255,0.4)" stopOpacity={0} />
+                              </linearGradient>
+                            </defs>
+                            <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.05)" vertical={false} />
+                            <XAxis dataKey="name" stroke="var(--text-muted)" fontSize={12} tickLine={false} axisLine={false} />
+                            <YAxis yAxisId="left" stroke="var(--text-muted)" fontSize={12} tickLine={false} axisLine={false} tickFormatter={(val) => `$${val}`} />
+                            <YAxis yAxisId="right" orientation="right" stroke="var(--primary)" fontSize={12} tickLine={false} axisLine={false} tickFormatter={(val) => `$${val}`} />
+                            <Tooltip content={<CustomTrendTooltip />} />
+                            <Legend verticalAlign="top" height={36} />
+                            <Area yAxisId="left" type="monotone" dataKey="income" name="Monthly Income" stroke="var(--success)" strokeWidth={2} fillOpacity={1} fill="url(#colorIncome)" />
+                            <Area yAxisId="left" type="monotone" dataKey="expenses" name="Monthly Expenses" stroke="var(--danger)" strokeWidth={2} fillOpacity={1} fill="url(#colorExpenses)" />
+                            <Area yAxisId="right" type="monotone" dataKey="startBalance" name="Starting Balance" stroke="rgba(255,255,255,0.4)" strokeDasharray="5 5" strokeWidth={2} fillOpacity={1} fill="url(#colorStart)" />
+                            <Area yAxisId="right" type="monotone" dataKey="worth" name="Ending Balance" stroke="var(--primary)" strokeWidth={3} fillOpacity={1} fill="url(#colorWorth)" />
+                          </ComposedChart>
+                        </ResponsiveContainer>
+                      </div>
+                    </div>
+
+                    {/* Table 1: Summary */}
+                    <div className="glass-card mb-2">
+                      <h3 className="mb-1" style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}><BarChart3 size={20} className="text-primary" /> Summary</h3>
+                      <div className="table-container">
+                        <table className="dashboard-table horizontal-table">
+                          <thead>
+                            <tr>
+                              <th className="row-label"></th>
+                              {worthData.map(m => (
+                                <th key={m.month} className="month-header" style={{ cursor: 'pointer' }} onClick={() => fetchMonthTransactions(m.month)}>
+                                  {m.name}
+                                </th>
+                              ))}
+                            </tr>
+                          </thead>
+                          <tbody>
+                            <tr>
+                              <td className="row-label">Income</td>
+                              {worthData.map(m => <td key={m.month} className="text-success">${m.income.toLocaleString()}</td>)}
+                            </tr>
+                            <tr>
+                              <td className="row-label">Expenses</td>
+                              {worthData.map(m => <td key={m.month} className="text-danger">${m.expenses.toLocaleString()}</td>)}
+                            </tr>
+                            <tr className="summary-highlight-row">
+                              <td className="row-label"><strong>Net Savings</strong></td>
+                              {worthData.map(m => {
+                                const net = m.income - m.expenses;
+                                return <td key={m.month} className={net >= 0 ? "text-success" : "text-danger"}><strong>${net.toLocaleString()}</strong></td>;
+                              })}
+                            </tr>
+                            <tr>
+                              <td className="row-label">Starting Balance</td>
+                              {worthData.map(m => <td key={m.month}>${m.startBalance.toLocaleString()}</td>)}
+                            </tr>
+                            <tr>
+                              <td className="row-label">Ending Balance</td>
+                              {worthData.map(m => <td key={m.month}><strong>${m.endBalance.toLocaleString()}</strong></td>)}
+                            </tr>
+                          </tbody>
+                        </table>
+                      </div>
+                    </div>
+
+                    {/* Table 2: Income Breakdown */}
+                    <div className="glass-card mb-2">
+                      <h3 className="mb-1 text-success" style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}><TrendingUp size={20} /> Income Breakdown</h3>
+                      <div className="table-container">
+                        <table className="dashboard-table horizontal-table">
+                          <thead>
+                            <tr>
+                              <th className="row-label">Category</th>
+                              {worthData.map(m => (
+                                <th key={m.month} className="month-header">{m.name}</th>
+                              ))}
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {(dashboardData?.income_labels || []).filter(label =>
+                              worthData.some(m => {
+                                const md = (dashboardData?.monthly || []).find(x => x.month === m.month);
+                                return md?.income_cats?.[label] > 0;
+                              })
+                            ).map(label => (
+                              <tr key={label}>
+                                <td className="row-label">{label}</td>
+                                {worthData.map(m => {
+                                  const md = (dashboardData?.monthly || []).find(x => x.month === m.month);
+                                  const val = md?.income_cats?.[label] || 0;
+                                  return <td key={m.month} className={val > 0 ? "text-success" : ""}>{val > 0 ? `$${val.toLocaleString()}` : '-'}</td>;
+                                })}
+                              </tr>
+                            ))}
+                            <tr className="summary-highlight-row">
+                              <td className="row-label"><strong>Total</strong></td>
+                              {worthData.map(m => <td key={m.month} className="text-success"><strong>${m.income.toLocaleString()}</strong></td>)}
+                            </tr>
+                          </tbody>
+                        </table>
+                      </div>
+                    </div>
+
+                    {/* Table 3: Expenses Breakdown */}
+                    <div className="glass-card mb-2">
+                      <h3 className="mb-1 text-danger" style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}><BarChart3 size={20} /> Expenses Breakdown</h3>
+                      <div className="table-container">
+                        <table className="dashboard-table horizontal-table">
+                          <thead>
+                            <tr>
+                              <th className="row-label">Category</th>
+                              {worthData.map(m => (
+                                <th key={m.month} className="month-header">{m.name}</th>
+                              ))}
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {(dashboardData?.expense_labels || []).filter(label =>
+                              worthData.some(m => {
+                                const md = (dashboardData?.monthly || []).find(x => x.month === m.month);
+                                return md?.expense_cats?.[label] > 0;
+                              })
+                            ).map(label => (
+                              <tr key={label}>
+                                <td className="row-label">{label}</td>
+                                {worthData.map(m => {
+                                  const md = (dashboardData?.monthly || []).find(x => x.month === m.month);
+                                  const val = md?.expense_cats?.[label] || 0;
+                                  const target = Number(budgetTargets[label]);
+                                  const isOverBudget = target > 0 && val > target;
+                                  return (
+                                    <td key={m.month} className={val > 0 ? "text-danger" : ""}>
+                                      {val > 0 ? `$${val.toLocaleString()}` : '-'}
+                                      {isOverBudget && <span title={`Target: $${target}`} style={{ fontSize: '0.75rem', marginLeft: '0.3rem', cursor: 'help' }}>⚠️</span>}
+                                    </td>
+                                  );
+                                })}
+                              </tr>
+                            ))}
+                            <tr className="summary-highlight-row">
+                              <td className="row-label"><strong>Total</strong></td>
+                              {worthData.map(m => <td key={m.month} className="text-danger"><strong>${m.expenses.toLocaleString()}</strong></td>)}
+                            </tr>
+                          </tbody>
+                        </table>
+                      </div>
+                    </div>
+
+                    <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) minmax(0, 1fr)', gap: '1.5rem', marginBottom: '1.5rem' }}>
+                      <div className="glass-card">
+                        <h3 className="mb-1" style={{ color: 'var(--text-muted)' }}>Budget Targets</h3>
+                        <div className="table-container" style={{ maxHeight: '400px', overflowY: 'auto' }}>
+                          <table className="dashboard-table">
+                            <thead>
+                              <tr>
+                                <th style={{ textAlign: 'left' }}>Category</th>
+                                <th style={{ textAlign: 'right' }}>Target ($ / month)</th>
+                              </tr>
+                            </thead>
+                            <tbody>
+                              {(dashboardData?.expense_labels || []).map(label => (
+                                <tr key={label}>
+                                  <td>{label}</td>
+                                  <td style={{ textAlign: 'right' }}>
+                                    <input
+                                      type="number"
+                                      value={budgetTargets[label] || ''}
+                                      placeholder="0.00"
+                                      style={{ width: '100px', background: 'rgba(0,0,0,0.2)', border: '1px solid var(--border)', padding: '0.3rem', color: 'var(--text)', borderRadius: '0.25rem', textAlign: 'right' }}
+                                      onBlur={(e) => updateBudgetTarget(label, e.target.value)}
+                                      onChange={(e) => setBudgetTargets(prev => ({ ...prev, [label]: e.target.value }))}
+                                    />
+                                  </td>
+                                </tr>
+                              ))}
+                            </tbody>
+                          </table>
+                        </div>
+                      </div>
+
+                      <div className="glass-card">
+                        <h3 className="mb-1" style={{ color: 'var(--text-muted)' }}>Detected Recurring Transactions</h3>
+                        <div className="table-container" style={{ maxHeight: '400px', overflowY: 'auto' }}>
+                          <table className="dashboard-table">
+                            <thead>
+                              <tr>
+                                <th style={{ textAlign: 'left' }}>Description</th>
+                                <th style={{ textAlign: 'left' }}>Category</th>
+                                <th style={{ textAlign: 'right' }}>Median Amount</th>
+                                <th style={{ textAlign: 'right' }}>Latest</th>
+                              </tr>
+                            </thead>
+                            <tbody>
+                              {recurringTransactions.map((tx, i) => (
+                                <tr key={i}>
+                                  <td style={{ textAlign: 'left' }}>
+                                    <strong>{tx.display_title}</strong>
+                                    <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>Seen {tx.count} times across {tx.months_count} months</div>
+                                  </td>
+                                  <td style={{ textAlign: 'left' }}><span className="badge">{tx.display_cat}</span></td>
+                                  <td style={{ textAlign: 'right' }} className={tx.type === 'income' ? 'text-success' : 'text-danger'}>
+                                    ${tx.median_amount.toLocaleString()}
+                                  </td>
+                                  <td style={{ textAlign: 'right', color: 'var(--text-muted)' }}>
+                                    {tx.last_seen}
+                                  </td>
+                                </tr>
+                              ))}
+                              {recurringTransactions.length === 0 && (
+                                <tr><td colSpan="4" style={{ textAlign: 'center', color: 'var(--text-muted)', padding: '2rem' }}>No recurring transactions detected yet.</td></tr>
+                              )}
+                            </tbody>
+                          </table>
+                        </div>
+                      </div>
+                    </div>
+                  </>
+                )}
               </>
             ) : (
               <div>
-                <button className="btn btn-ghost mb-2" onClick={() => { setSelectedMonth(null); setSelectedDrillDownCategory(null); }}><ArrowLeft size={18} /> Back to Summary</button>
+                <button
+                  className="btn btn-ghost mb-2"
+                  onClick={() => { setSelectedMonth(null); setSelectedDrillDownCategory(null); }}
+                  style={{ position: 'sticky', top: '5%', zIndex: 50, backdropFilter: 'blur(10px)', background: 'rgba(0,0,0,0.4)', border: '1px solid var(--border)' }}
+                >
+                  <ArrowLeft size={18} /> Back to Summary
+                </button>
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.5rem' }}>
                   <h2>{new Date(selectedMonth + '-01').toLocaleDateString('en-AU', { month: 'long', year: 'numeric' })}</h2>
                   <div style={{ display: 'flex', gap: '1.5rem' }}>
@@ -882,7 +1133,7 @@ function App() {
                                 acc[cat] = (acc[cat] || 0) + Number(tx.credit);
                               }
                               return acc;
-                            }, {})).sort((a, b) => b[1] - a[1]).map(([name, value]) => ({ name, value: Math.round(value) }))}
+                            }, {})).sort((a, b) => a[0].localeCompare(b[0])).map(([name, value]) => ({ name, value: Math.round(value) }))}
                             dataKey="value"
                             nameKey="name"
                             cx="50%"
@@ -891,6 +1142,8 @@ function App() {
                             innerRadius={50}
                             paddingAngle={2}
                             strokeWidth={0}
+                            style={{ cursor: 'pointer' }}
+                            onClick={(entry) => setSelectedDrillDownCategory(selectedDrillDownCategory === entry.name ? null : entry.name)}
                           >
                             {Object.entries(monthlyTransactions.reduce((acc, tx) => {
                               if (Number(tx.credit) > 0 && tx.is_paired === 0) {
@@ -898,7 +1151,7 @@ function App() {
                                 acc[cat] = (acc[cat] || 0) + Number(tx.credit);
                               }
                               return acc;
-                            }, {})).sort((a, b) => b[1] - a[1]).map((_, i) => (
+                            }, {})).sort((a, b) => a[0].localeCompare(b[0])).map((_, i) => (
                               <Cell key={i} fill={['#10b981', '#34d399', '#6ee7b7', '#a7f3d0', '#d1fae5', '#059669', '#047857', '#065f46'][i % 8]} />
                             ))}
                           </Pie>
@@ -913,7 +1166,7 @@ function App() {
                           acc[cat] = (acc[cat] || 0) + Number(tx.credit);
                         }
                         return acc;
-                      }, {})).sort((a, b) => b[1] - a[1]).map(([cat, total]) => (
+                      }, {})).sort((a, b) => a[0].localeCompare(b[0])).map(([cat, total]) => (
                         <div
                           key={cat}
                           className={`stat-row clickable-row ${selectedDrillDownCategory === cat ? 'active-filter' : ''}`}
@@ -938,7 +1191,7 @@ function App() {
                                 acc[cat] = (acc[cat] || 0) + Number(tx.debit);
                               }
                               return acc;
-                            }, {})).sort((a, b) => b[1] - a[1]).map(([name, value]) => ({ name, value: Math.round(value) }))}
+                            }, {})).sort((a, b) => a[0].localeCompare(b[0])).map(([name, value]) => ({ name, value: Math.round(value) }))}
                             dataKey="value"
                             nameKey="name"
                             cx="50%"
@@ -947,6 +1200,8 @@ function App() {
                             innerRadius={50}
                             paddingAngle={2}
                             strokeWidth={0}
+                            style={{ cursor: 'pointer' }}
+                            onClick={(entry) => setSelectedDrillDownCategory(selectedDrillDownCategory === entry.name ? null : entry.name)}
                           >
                             {Object.entries(monthlyTransactions.reduce((acc, tx) => {
                               if (Number(tx.debit) > 0 && tx.is_paired === 0) {
@@ -954,7 +1209,7 @@ function App() {
                                 acc[cat] = (acc[cat] || 0) + Number(tx.debit);
                               }
                               return acc;
-                            }, {})).sort((a, b) => b[1] - a[1]).map((_, i) => (
+                            }, {})).sort((a, b) => a[0].localeCompare(b[0])).map((_, i) => (
                               <Cell key={i} fill={['#ef4444', '#f87171', '#fca5a5', '#fecaca', '#fee2e2', '#dc2626', '#b91c1c', '#991b1b'][i % 8]} />
                             ))}
                           </Pie>
@@ -969,7 +1224,7 @@ function App() {
                           acc[cat] = (acc[cat] || 0) + Number(tx.debit);
                         }
                         return acc;
-                      }, {})).sort((a, b) => b[1] - a[1]).map(([cat, total]) => (
+                      }, {})).sort((a, b) => a[0].localeCompare(b[0])).map(([cat, total]) => (
                         <div
                           key={cat}
                           className={`stat-row clickable-row ${selectedDrillDownCategory === cat ? 'active-filter' : ''}`}
