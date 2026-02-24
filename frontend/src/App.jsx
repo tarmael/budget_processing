@@ -595,8 +595,8 @@ function App() {
     <div className="app-container">
       <header>
         <motion.div initial={{ opacity: 0, x: -20 }} animate={{ opacity: 1, x: 0 }}>
-          <h1>Budget Processing</h1>
-          <p style={{ color: 'var(--text-muted)' }}>Precision Bank Statement Pre-processing</p>
+          <h1>Budgie</h1>
+          <p style={{ color: 'var(--text-muted)' }}>Precision Budgetting</p>
         </motion.div>
         <div style={{ display: 'flex', gap: '1rem' }}>
           <button className={`btn ${activeTab === 'categories' ? 'btn-primary' : 'btn-ghost'}`} onClick={() => setActiveTab('categories')}>Categories</button>
@@ -896,10 +896,10 @@ function App() {
                             <YAxis yAxisId="right" orientation="right" stroke="var(--primary)" fontSize={12} tickLine={false} axisLine={false} tickFormatter={(val) => `$${val}`} />
                             <Tooltip content={<CustomTrendTooltip />} />
                             <Legend verticalAlign="top" height={36} />
-                            <Area yAxisId="left" type="monotone" dataKey="income" name="Monthly Income" stroke="var(--success)" strokeWidth={2} fillOpacity={1} fill="url(#colorIncome)" />
-                            <Area yAxisId="left" type="monotone" dataKey="expenses" name="Monthly Expenses" stroke="var(--danger)" strokeWidth={2} fillOpacity={1} fill="url(#colorExpenses)" />
-                            <Area yAxisId="right" type="monotone" dataKey="startBalance" name="Starting Balance" stroke="rgba(255,255,255,0.4)" strokeDasharray="5 5" strokeWidth={2} fillOpacity={1} fill="url(#colorStart)" />
-                            <Area yAxisId="right" type="monotone" dataKey="worth" name="Ending Balance" stroke="var(--primary)" strokeWidth={3} fillOpacity={1} fill="url(#colorWorth)" />
+                            <Area yAxisId="left" type="monotone" dataKey="income" name="Income" stroke="var(--success)" strokeWidth={2} fillOpacity={1} fill="url(#colorIncome)" />
+                            <Area yAxisId="left" type="monotone" dataKey="expenses" name="Expenses" stroke="var(--danger)" strokeWidth={2} fillOpacity={1} fill="url(#colorExpenses)" />
+                            <Area yAxisId="right" type="monotone" dataKey="startBalance" name="Position Start" stroke="rgba(255,255,255,0.4)" strokeDasharray="5 5" strokeWidth={2} fillOpacity={1} fill="url(#colorStart)" />
+                            <Area yAxisId="right" type="monotone" dataKey="worth" name="Position End" stroke="var(--primary)" strokeWidth={3} fillOpacity={1} fill="url(#colorWorth)" />
                           </ComposedChart>
                         </ResponsiveContainer>
                       </div>
