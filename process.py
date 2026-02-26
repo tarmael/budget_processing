@@ -15,8 +15,8 @@ def get_best_match(description, categories_data, threshold=80):
     highest_score = 0
     
     # "Transfers" category logic: 
-    # The "IGNORED" category was renamed to "Transfers" in categories.json.
-    # If a line cannot be fuzzy matched, it will be added to .NO_CATEGORY.csv.
+    # The "Transfers" category is used to identify internal money movements.
+    # Unmatched transactions are stored in the DB with title='UNMATCHED'.
     
     for cat_obj in categories_data['categories']:
         category_name = cat_obj['name']
@@ -188,12 +188,6 @@ def process_csv(input_paths, output_base, categories_path, config_path=None, col
     write_safe(output_base + '.duplicates.csv', duplicates, configs['duplicates'])
     
     unmatched = [r for r in all_raw_rows if r['Title'] == 'UNMATCHED']
-    if unmatched:
-        # Use debit or credit columns depending on what's available for the row, 
-        # but for NO_CATEGORY.csv we might want both or a standard set.
-        # GEMINI.md says: Date, Description, Category, Title, Debit, Credit
-        no_cat_fields = ['Date', 'Description', 'Category', 'Title', 'Debit', 'Credit']
-        write_safe(output_base + '.NO_CATEGORY.csv', unmatched, no_cat_fields)
 
     # Persist to database
     # Since multiple files can be processed, we attribute them to the output base 

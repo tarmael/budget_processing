@@ -72,6 +72,16 @@ def init_db():
             target REAL NOT NULL
         )
     ''')
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS budget_plans (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            effective_from TEXT NOT NULL,
+            category TEXT NOT NULL,
+            type TEXT NOT NULL,
+            planned_amount REAL NOT NULL DEFAULT 0,
+            UNIQUE(effective_from, category, type)
+        )
+    ''')
     conn.commit()
     conn.close()
 
@@ -247,6 +257,14 @@ def get_balance_anchors():
     conn.close()
     return anchors
 
+def delete_balance_anchor(date):
+    """Delete a balance anchor by date."""
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    cursor.execute("DELETE FROM balance_anchors WHERE date = ?", (date,))
+    conn.commit()
+    conn.close()
+
 def get_dashboard_data():
     """Aggregate data for the dashboard view with monthly categorical breakdowns."""
     conn = get_db_connection()
@@ -349,11 +367,75 @@ def set_budget_target(category, target):
     conn.commit()
     conn.close()
 
+def get_budget_plan_for_month(month_str):
+    """
+    Return the budget plan in effect for a given YYYY-MM month.
+    For each (category, type) pair, picks the most recent plan version
+    whose effective_from <= month_str. Returns a list of row dicts.
+    """
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    try:
+        cursor.execute('''
+            SELECT bp.category, bp.type, bp.planned_amount, bp.effective_from
+            FROM budget_plans bp
+            INNER JOIN (
+                SELECT category, type, MAX(effective_from) as latest
+                FROM budget_plans
+                WHERE effective_from <= ?
+                GROUP BY category, type
+            ) latest_plan
+            ON bp.category = latest_plan.category
+            AND bp.type = latest_plan.type
+            AND bp.effective_from = latest_plan.latest
+            ORDER BY bp.type, bp.category
+        ''', (month_str,))
+        rows = [dict(r) for r in cursor.fetchall()]
+    except sqlite3.OperationalError:
+        rows = []
+    conn.close()
+    return rows
+
+def save_budget_plan(effective_from, items):
+    """
+    Save a batch of budget plan items for a given effective_from month.
+    'items' is a list of dicts: [{ category, type, planned_amount }, ...]
+    Uses INSERT OR REPLACE to upsert.
+    """
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    for item in items:
+        cursor.execute('''
+            INSERT INTO budget_plans (effective_from, category, type, planned_amount)
+            VALUES (?, ?, ?, ?)
+            ON CONFLICT(effective_from, category, type)
+            DO UPDATE SET planned_amount = excluded.planned_amount
+        ''', (
+            effective_from,
+            item['category'],
+            item['type'],
+            float(item.get('planned_amount', 0))
+        ))
+    conn.commit()
+    conn.close()
+
+def get_budget_plan_versions():
+    """Return a sorted list of all distinct effective_from months that have a saved plan."""
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    try:
+        cursor.execute("SELECT DISTINCT effective_from FROM budget_plans ORDER BY effective_from DESC")
+        versions = [row['effective_from'] for row in cursor.fetchall()]
+    except sqlite3.OperationalError:
+        versions = []
+    conn.close()
+    return versions
+
 def get_recurring_transactions():
     """
     Identify potential recurring transactions.
     Finds transactions with the same combination of title, type (debit/credit),
-    and very similar amounts across at least 2 distinct months.
+    and very similar amounts across at least 3 distinct months.
     """
     conn = get_db_connection()
     cursor = conn.cursor()

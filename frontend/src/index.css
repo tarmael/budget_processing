@@ -10,6 +10,8 @@
   --border: rgba(255, 255, 255, 0.1);
   --success: #10b981;
   --danger: #ef4444;
+  --income: #818cf8;
+  --expense: #c084fc;
   --font-family: 'Outfit', sans-serif;
 }
 
@@ -335,8 +337,14 @@ td {
 }
 
 .fy-select {
-  font-weight: 600;
-  color: var(--primary);
+  font-weight: 500;
+  color: var(--text-main);
+}
+
+.fy-select option,
+.override-select option {
+  background: var(--bg-dark);
+  color: var(--text-main);
 }
 
 .text-success {
@@ -349,6 +357,14 @@ td {
 
 .text-primary {
   color: var(--primary) !important;
+}
+
+.text-income {
+  color: var(--income) !important;
+}
+
+.text-expense {
+  color: var(--expense) !important;
 }
 
 .mb-1 {
