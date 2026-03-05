@@ -242,27 +242,41 @@ export default function Dashboard({ categories, showMessage, API_BASE }) {
         if (!dashboardData?.monthly || !selectedFY) return [];
         const fyMonthList = getFYMonths(selectedFY, fyStartMonth);
         const fyMonthSet = new Set(fyMonthList);
-        const sortedMonthly = [...dashboardData.monthly]
-            .filter(m => fyMonthSet.has(m.month))
-            .sort((a, b) => a.month.localeCompare(b.month));
 
+        // Sort anchors chronologically
+        const sortedAnchors = [...balanceAnchors].sort((a, b) => a.date.localeCompare(b.date));
+
+        // Ensure all historical months up to the current view are sorted chronologically
+        const allMonths = [...dashboardData.monthly].sort((a, b) => a.month.localeCompare(b.month));
+
+        // We will build a map of { month: { startBalance, endBalance, income, expenses } }
         let runningBalance = 0;
-        if (balanceAnchors.length > 0) {
-            const sortedAnchors = [...balanceAnchors].sort((a, b) => a.date.localeCompare(b.date));
-            runningBalance = sortedAnchors[0].balance;
-            const allMonths = [...dashboardData.monthly].sort((a, b) => a.month.localeCompare(b.month));
-            for (const m of allMonths) {
-                if (fyMonthSet.has(m.month)) break;
-                if (m.month < fyMonthList[0]) {
-                    runningBalance += (m.income - m.expenses);
+        const monthResults = [];
+
+        for (const m of allMonths) {
+            // Did we pass an anchor date this month or just prior?
+            // To simplify: if any anchor exists that is <= end of this month, and we haven't applied an anchor MORE recent than it
+            // Practically, we find the latest anchor that is <= the current month being calculated
+            const targetMonthStr = m.month; // "2024-01"
+
+            // Find all anchors that occurred before or during this month
+            // Example: anchor "2024-01-15". For month "2024-01", it applies. For "2024-02", a newer one might apply
+            const applicableAnchors = sortedAnchors.filter(a => a.date.substring(0, 7) <= targetMonthStr);
+
+            if (applicableAnchors.length > 0) {
+                // The most recent anchor that occurred on or before this month
+                const latestAnchor = applicableAnchors[applicableAnchors.length - 1];
+
+                // If the anchor was exactly in this month, we set the start balance to the anchor
+                if (latestAnchor.date.substring(0, 7) === targetMonthStr) {
+                    runningBalance = latestAnchor.balance;
                 }
             }
-        }
 
-        return sortedMonthly.map(m => {
             const startBal = runningBalance;
             runningBalance += (m.income - m.expenses);
-            return {
+
+            monthResults.push({
                 name: new Date(m.month + '-01').toLocaleDateString('en-AU', { month: 'short' }),
                 worth: Math.round(runningBalance),
                 income: Math.round(m.income),
@@ -270,8 +284,11 @@ export default function Dashboard({ categories, showMessage, API_BASE }) {
                 startBalance: Math.round(startBal),
                 endBalance: Math.round(runningBalance),
                 month: m.month
-            };
-        });
+            });
+        }
+
+        // Return only the months requested for the FY
+        return monthResults.filter(m => fyMonthSet.has(m.month));
     };
 
     const CustomTrendTooltip = ({ active, payload, label }) => {
@@ -305,11 +322,24 @@ export default function Dashboard({ categories, showMessage, API_BASE }) {
     const getYearlyData = () => {
         if (!dashboardData?.monthly) return [];
         const sortedMonthly = [...dashboardData.monthly].sort((a, b) => a.month.localeCompare(b.month));
-        let runningBalance = balanceAnchors.length > 0 ? [...balanceAnchors].sort((a, b) => a.date.localeCompare(b.date))[0].balance : 0;
+        const sortedAnchors = [...balanceAnchors].sort((a, b) => a.date.localeCompare(b.date));
+
+        let runningBalance = 0;
         const fyMap = {};
 
         sortedMonthly.forEach(m => {
             const parts = m.month.split('-');
+            const targetMonthStr = m.month;
+
+            // Check for anchors explicitly set in this month to update the running balance
+            const applicableAnchors = sortedAnchors.filter(a => a.date.substring(0, 7) <= targetMonthStr);
+            if (applicableAnchors.length > 0) {
+                const latestAnchor = applicableAnchors[applicableAnchors.length - 1];
+                if (latestAnchor.date.substring(0, 7) === targetMonthStr) {
+                    runningBalance = latestAnchor.balance;
+                }
+            }
+
             const date = new Date(parseInt(parts[0]), parseInt(parts[1]) - 1, 1);
             const fy = getFYForDate(date, fyStartMonth);
             const startBal = runningBalance;

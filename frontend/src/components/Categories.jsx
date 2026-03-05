@@ -19,27 +19,55 @@ export default function Categories({
 
     const handleDragStart = (e, catName, pIdx) => {
         setDraggedItem({ catName, pIdx });
-        e.dataTransfer.setData("text/plain", JSON.stringify({ catName, pIdx }));
+        e.dataTransfer.setData("application/json", JSON.stringify({ catName, pIdx }));
         e.dataTransfer.effectAllowed = "move";
     };
 
+    const handleDragEnd = () => {
+        setDraggedItem(null);
+        setDragOverCatName(null);
+    };
+
     const handleDragOver = (e, catName) => {
+        e.preventDefault(); // Necessary to allow dropping
+        e.dataTransfer.dropEffect = "move";
+    };
+
+    const handleDragEnter = (e, catName) => {
         e.preventDefault();
         if (draggedItem && draggedItem.catName !== catName) {
             setDragOverCatName(catName);
         }
     };
 
+    const handleDragLeave = (e, catName) => {
+        e.preventDefault();
+        // Clear if leaving the main card (not just hovering over children)
+        if (!e.currentTarget.contains(e.relatedTarget) && dragOverCatName === catName) {
+            setDragOverCatName(null);
+        }
+    };
+
     const handleDrop = (e, targetCatName) => {
         e.preventDefault();
         setDragOverCatName(null);
-        if (!draggedItem) return;
-        const sourceCatName = draggedItem.catName;
-        const pIdx = draggedItem.pIdx;
+
+        let sourceData = null;
+        try {
+            const dataStr = e.dataTransfer.getData("application/json") || e.dataTransfer.getData("text/plain");
+            if (dataStr) sourceData = JSON.parse(dataStr);
+        } catch (err) { }
+
+        const sourceCatName = sourceData?.catName || draggedItem?.catName;
+        const pIdx = sourceData?.pIdx ?? draggedItem?.pIdx;
+
+        if (!sourceCatName || pIdx === undefined) return;
         if (sourceCatName === targetCatName) return;
+
         const newCats = [...categories];
         const sourceIdx = newCats.findIndex(c => c.name === sourceCatName);
         const targetIdx = newCats.findIndex(c => c.name === targetCatName);
+
         if (sourceIdx !== -1 && targetIdx !== -1) {
             const [movedPattern] = newCats[sourceIdx].patterns.splice(pIdx, 1);
             newCats[targetIdx].patterns.push(movedPattern);
@@ -54,6 +82,17 @@ export default function Categories({
             setCategories([{ name: newCategoryName.trim(), patterns: [] }, ...categories]);
             setNewCategoryName("");
             setIsAddingCategory(false);
+        }
+    };
+
+    const handleDeleteCategory = (catName) => {
+        if (catName === 'Transfers') {
+            showMessage("Cannot delete system category", "error");
+            return;
+        }
+        if (window.confirm(`Are you sure you want to delete the "${catName}" category and all its patterns?`)) {
+            setCategories(categories.filter(c => c.name !== catName));
+            showMessage(`Deleted category "${catName}"`, "success");
         }
     };
 
@@ -143,14 +182,22 @@ export default function Categories({
                     <motion.div
                         key={cat.name}
                         className={`glass-card category-card ${dragOverCatName === cat.name ? 'drag-over' : ''}`}
+                        onDragEnter={(e) => handleDragEnter(e, cat.name)}
                         onDragOver={(e) => handleDragOver(e, cat.name)}
-                        onDragLeave={() => setDragOverCatName(null)}
+                        onDragLeave={(e) => handleDragLeave(e, cat.name)}
                         onDrop={(e) => handleDrop(e, cat.name)}
                         layout
                     >
                         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'start' }}>
-                            <h3>{cat.name}</h3>
-                            {cat.name === 'Transfers' && <span className="badge badge-ignored">SYSTEM</span>}
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                                <h3>{cat.name}</h3>
+                                {cat.name === 'Transfers' && <span className="badge badge-ignored" style={{ marginBottom: '1rem' }}>SYSTEM</span>}
+                            </div>
+                            {cat.name !== 'Transfers' && (
+                                <button className="btn-ghost" style={{ padding: '0.2rem', color: 'var(--text-muted)', border: 'none', background: 'transparent', cursor: 'pointer' }} onClick={() => handleDeleteCategory(cat.name)} title="Delete Category">
+                                    <Trash2 size={16} />
+                                </button>
+                            )}
                         </div>
 
                         <div style={{ marginBottom: '1.5rem', minHeight: '20px' }}>
@@ -171,7 +218,9 @@ export default function Categories({
                                 );
 
                                 return (
-                                    <div key={pIdx} className="pattern-item" draggable onDragStart={(e) => handleDragStart(e, cat.name, pIdx)}>
+                                    <div key={pIdx} className="pattern-item" draggable
+                                        onDragStart={(e) => handleDragStart(e, cat.name, pIdx)}
+                                        onDragEnd={handleDragEnd}>
                                         <div style={{ overflow: 'hidden', textOverflow: 'ellipsis', flex: 1 }}>
                                             <span className="pattern-key">{patternKey}</span>
                                             <span style={{ margin: '0 0.5rem', color: 'var(--primary)' }}>→</span>

@@ -14,6 +14,7 @@ function App() {
   const [loading, setLoading] = useState(true);
   const [activeTab, setActiveTab] = useState(() => localStorage.getItem('budget_active_tab') || "categories");
   const [message, setMessage] = useState(null);
+  const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false);
 
   // Shared state that Categories and ProcessCSV need
   const [isAddingCategory, setIsAddingCategory] = useState(false);
@@ -58,6 +59,7 @@ function App() {
       const res = await fetch(`${API_BASE}/categories`);
       const data = await res.json();
       setCategories(data.categories);
+      setHasUnsavedChanges(false);
       setLoading(false);
     } catch (err) {
       console.error("Failed to fetch categories", err);
@@ -83,6 +85,7 @@ function App() {
           })
         })
       ]);
+      setHasUnsavedChanges(false);
       if (!silent) showMessage("All changes saved successfully!", "success");
     } catch (err) {
       if (!silent) showMessage("Failed to save changes", "error");
@@ -122,11 +125,26 @@ function App() {
         )}
       </AnimatePresence>
 
+      <AnimatePresence>
+        {hasUnsavedChanges && activeTab === 'categories' && (
+          <motion.div
+            initial={{ opacity: 1, y: -20, x: '-50%' }}
+            animate={{ opacity: 1, y: 0, x: '-50%' }}
+            exit={{ opacity: 0, y: -20, x: '-50%' }}
+            style={{ position: 'fixed', top: '10%', left: '50%', zIndex: 1000 }}
+          >
+            <button className="btn btn-primary" style={{ padding: '1rem 3rem', fontSize: '1.2rem', boxShadow: '0 10px 40px rgba(99, 102, 241, 0.4)', borderRadius: '2rem' }} onClick={() => handleSave()}>
+              <Save size={24} /> Save Changes
+            </button>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
       <main>
         {activeTab === 'categories' && (
           <Categories
             categories={categories}
-            setCategories={setCategories}
+            setCategories={(val) => { setCategories(val); setHasUnsavedChanges(true); }}
             showMessage={showMessage}
             isAddingCategory={isAddingCategory}
             setIsAddingCategory={setIsAddingCategory}

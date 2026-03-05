@@ -1,0 +1,68 @@
+{
+    "debit_columns": [
+        "Date",
+        "Description",
+        "Category",
+        "Title",
+        "Debit"
+    ],
+    "credit_columns": [
+        "Date",
+        "Description",
+        "Category",
+        "Title",
+        "Credit"
+    ],
+    "duplicates_columns": [
+        "Date",
+        "Description",
+        "Category",
+        "Title",
+        "Debit",
+        "Credit"
+    ],
+    "fy_start_month": 7,
+    "default_bank_profile": "",
+    "bank_profiles": {
+        "great_southern": {
+            "label": "Great Southern Bank",
+            "columns": {
+                "date": "Date",
+                "description": "Description",
+                "debit": "Debit",
+                "credit": "Credit",
+                "balance": "Balance"
+            }
+        },
+        "cba": {
+            "label": "Commonwealth Bank (CBA)",
+            "columns": {
+                "date": "Date",
+                "description": "Description",
+                "debit": "Debit",
+                "credit": "Credit",
+                "balance": "Balance"
+            }
+        },
+        "westpac": {
+            "label": "Westpac",
+            "columns": {
+                "date": "Date",
+                "description": "Narrative",
+                "debit": "Debit Amount",
+                "credit": "Credit Amount",
+                "balance": "Balance"
+            }
+        },
+        "anz": {
+            "label": "ANZ",
+            "columns": {
+                "date": "Date",
+                "description": "Details",
+                "debit": "Debit",
+                "credit": "Credit",
+                "balance": "Balance"
+            }
+        }
+    }
+}

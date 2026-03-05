@@ -107,7 +107,7 @@ export default function ProcessCSV({
                 <div style={{ textAlign: 'center', padding: '4rem' }}>
 
                     <div style={{ display: 'flex', flexWrap: 'wrap', gap: '2rem', marginBottom: '3rem', justifyContent: 'center' }}>
-                        {['debit', 'credit', 'duplicates'].map(type => (
+                        {['debit', 'credit'].map(type => (
                             <div key={type} className="column-reorder-container" style={{ flex: '1 1 250px', maxWidth: '350px' }}>
                                 <span style={{ fontSize: '0.7rem', color: 'var(--text-muted)', display: 'block', marginBottom: '0.5rem', textAlign: 'left' }}>{type.toUpperCase()} COLUMNS:</span>
                                 <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.5rem' }}>
