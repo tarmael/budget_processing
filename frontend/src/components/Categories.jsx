@@ -10,6 +10,7 @@ export default function Categories({
     setIsAddingCategory,
 }) {
     const [search, setSearch] = useState("");
+    const [newCategoryName, setNewCategoryName] = useState("");
     const [editingCatIndex, setEditingCatIndex] = useState(null);
     const [newPattern, setNewPattern] = useState({ desc: '', title: '' });
     const [editingPattern, setEditingPattern] = useState(null);
@@ -46,6 +47,14 @@ export default function Categories({
             showMessage(`Moved to ${targetCatName}. Remember to Save Changes.`, "success");
         }
         setDraggedItem(null);
+    };
+
+    const handleAddCategory = () => {
+        if (newCategoryName.trim()) {
+            setCategories([{ name: newCategoryName.trim(), patterns: [] }, ...categories]);
+            setNewCategoryName("");
+            setIsAddingCategory(false);
+        }
     };
 
     const handleAddPattern = (catName) => {
@@ -100,6 +109,34 @@ export default function Categories({
                     <Plus size={18} /> New Category
                 </button>
             </div>
+
+            <AnimatePresence>
+                {isAddingCategory && (
+                    <motion.div
+                        initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+                        style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)', backdropFilter: 'blur(5px)', zIndex: 1000, display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+                    >
+                        <motion.div
+                            initial={{ scale: 0.9, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} exit={{ scale: 0.9, opacity: 0 }}
+                            className="glass-card" style={{ padding: '2rem', width: '400px', background: 'var(--bg-card)' }}
+                        >
+                            <h2 style={{ marginTop: 0, marginBottom: '1.5rem' }}>New Category</h2>
+                            <input
+                                autoFocus
+                                placeholder="Category Name..."
+                                style={{ width: '100%', marginBottom: '2rem' }}
+                                value={newCategoryName}
+                                onChange={(e) => setNewCategoryName(e.target.value)}
+                                onKeyDown={(e) => e.key === 'Enter' && handleAddCategory()}
+                            />
+                            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '1rem' }}>
+                                <button className="btn btn-ghost" onClick={() => { setIsAddingCategory(false); setNewCategoryName(""); }}>Cancel</button>
+                                <button className="btn btn-primary" onClick={handleAddCategory}>Add Category</button>
+                            </div>
+                        </motion.div>
+                    </motion.div>
+                )}
+            </AnimatePresence>
 
             <div className="category-grid">
                 {filteredCategories.map((cat, idx) => (
