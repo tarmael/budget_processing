@@ -55,7 +55,14 @@ async def startup_event():
     if not os.path.exists(CATEGORIES_FILE):
         print(f"INFO: {CATEGORIES_FILE} not found. Creating default template...")
         with open(CATEGORIES_FILE, 'w') as f:
-            json.dump({"categories": []}, f, indent=4)
+            json.dump({
+                "categories": [
+                    {
+                        "name": "Transfers",
+                        "patterns": []
+                    }
+                ]
+            }, f, indent=4)
             
     if not os.path.exists(CONFIG_FILE):
         print(f"INFO: {CONFIG_FILE} not found. Creating default template...")
