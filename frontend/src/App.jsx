@@ -105,7 +105,7 @@ function App() {
       <header>
         <motion.div initial={{ opacity: 0, x: -20 }} animate={{ opacity: 1, x: 0 }}>
           <h1>Budgie</h1>
-          <p style={{ color: 'var(--text-muted)' }}>Precision Budgetting</p>
+          <p style={{ color: 'var(--text-muted)' }}>Precision Budgeting</p>
         </motion.div>
         <div style={{ display: 'flex', gap: '1rem' }}>
           <button className={`btn ${activeTab === 'categories' ? 'btn-primary' : 'btn-ghost'}`} onClick={() => setActiveTab('categories')}>Categories</button>
