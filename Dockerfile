@@ -1,5 +1,5 @@
 # Build stage for React frontend
-FROM node:20-slim AS build-frontend
+FROM node:slim AS build-frontend
 WORKDIR /app/frontend
 COPY frontend/package*.json ./
 RUN npm config set fetch-retries 5 && \
@@ -10,7 +10,7 @@ COPY frontend/ ./
 RUN npm run build
 
 # Final stage for Python backend
-FROM python:3.13-slim
+FROM python:slim
 WORKDIR /app
 
 # Install system dependencies
@@ -26,7 +26,7 @@ RUN pip install --no-cache-dir -r requirements.txt
 COPY --from=build-frontend /app/frontend/dist ./frontend/dist
 
 # 3. Add Backend Logic (Most frequent changes)
-COPY server.py process.py database.py .env ./
+COPY budgie.py process.py database.py .env ./
 
 # Ensure input directory exists for local mounts
 RUN mkdir -p /app/input
@@ -40,4 +40,4 @@ ENV PYTHONUNBUFFERED=1
 
 EXPOSE 8000
 
-CMD ["python", "server.py"]
+CMD ["python", "budgie.py"]

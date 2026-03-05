@@ -17,8 +17,6 @@ See HOWTO.md for detailed instructions on how to use the application.
 
 ### Option 1: Running Locally
 
-To run the application locally without Docker:
-
 #### 1. Requirements
 Ensure you have Python 3.10+ and Node.js 18+ installed.
 
@@ -33,7 +31,6 @@ pip install -r requirements.txt
 ```
 
 #### 3. Frontend Setup (One-time or on change)
-You only need to build the frontend if you want FastAPI to serve it. For development, use the Vite dev server.
 
 To build:
 ```bash
@@ -43,13 +40,14 @@ npm run build
 cd ..
 ```
 
+Note: This will need to be done if you pull the latest changes from the repository and there are updates to the frontend.
+
 #### 4. Start the Application
-The `.env` file handles the paths for you.
+The `.env` file handles the paths for you. The port is also specified here.
 
 ```bash
-# Start the backend
-source .venv/bin/activate
-python server.py
+# Start the server
+.venv/bin/uvicorn budgie:app --reload
 ```
 
 Now open: [http://localhost:8000](http://localhost:8000)
