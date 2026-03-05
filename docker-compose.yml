@@ -7,11 +7,9 @@ services:
       - "8000:8000"
     volumes:
       # Mount your local files into the container
-      - ./categories.json:/app/input/categories.json
       - ./config.json:/app/input/config.json
       - ./transactions.db:/app/input/transactions.db
     environment:
-      - CATEGORIES_PATH=/app/input/categories.json
       - CONFIG_PATH=/app/input/config.json
       - DATABASE_PATH=/app/input/transactions.db
     restart: unless-stopped

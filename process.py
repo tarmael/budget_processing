@@ -6,10 +6,6 @@ from datetime import datetime
 from rapidfuzz import process, fuzz
 import database
 
-def load_categories(file_path):
-    with open(file_path, 'r') as f:
-        return json.load(f)
-
 def get_best_match(description, categories_data, threshold=80):
     best_match = None
     highest_score = 0
@@ -35,11 +31,10 @@ def get_best_match(description, categories_data, threshold=80):
     
     return best_match
 
-def process_csv(input_paths, output_base, categories_path, config_path=None, column_mapping=None):
+def process_csv(input_paths, output_base, categories_data, config_path=None, column_mapping=None):
     if isinstance(input_paths, str):
         input_paths = [input_paths]
         
-    categories_data = load_categories(categories_path)
     database.init_db()
     
     # Load config for column orders
@@ -208,13 +203,14 @@ if __name__ == "__main__":
     else:
         output_csv = input_csv.rsplit('.', 1)[0] + '.processed.csv'
         
-    # Standardize path for Docker/Local flexibility
-    categories_json = os.getenv("CATEGORIES_PATH", "categories.json")
     config_json = os.getenv("CONFIG_PATH", "config.json")
     
     if not os.path.exists(input_csv):
         print(f"Error: File {input_csv} not found.")
         sys.exit(1)
         
-    process_csv(input_csv, output_csv, categories_json, config_json)
+    database.init_db()
+    categories_dict = database.get_categories()
+        
+    process_csv(input_csv, output_csv, categories_dict, config_json)
     print(f"Processed file saved to {output_csv}")

@@ -1,7 +1,7 @@
 __pycache__
 node_modules
 config.json
-categories.json
+.env
 .venv
 transactions.db
 *.sh

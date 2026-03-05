@@ -32,7 +32,6 @@ COPY budgie.py process.py database.py .env ./
 RUN mkdir -p /app/input
 
 # Environment variables
-ENV CATEGORIES_PATH=/app/input/categories.json
 ENV CONFIG_PATH=/app/input/config.json
 ENV DATABASE_PATH=/app/input/transactions.db
 ENV PORT=8000

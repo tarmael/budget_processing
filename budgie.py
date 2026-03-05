@@ -8,14 +8,12 @@ from typing import List, Dict, Any
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
 import process # Import our logic from process.py
-import database
+import database # Import our logic from database.py
 from dotenv import load_dotenv
 
 # Load local environment variables if .env exists
 load_dotenv()
 
-# Standardize path for Docker/Local flexibility
-CATEGORIES_FILE = os.getenv("CATEGORIES_PATH", "categories.json")
 CONFIG_FILE = os.getenv("CONFIG_PATH", "config.json")
 
 DEFAULT_CONFIG = {
@@ -44,30 +42,22 @@ DEFAULT_CONFIG = {
     }
 }
 
-app = FastAPI()
+from contextlib import asynccontextmanager
 
-@app.on_event("startup")
-async def startup_event():
+@asynccontextmanager
+async def lifespan(app: FastAPI):
     print("INFO: Initializing database on startup...")
     database.init_db()
     
     # Initialize templates if they don't exist
-    if not os.path.exists(CATEGORIES_FILE):
-        print(f"INFO: {CATEGORIES_FILE} not found. Creating default template...")
-        with open(CATEGORIES_FILE, 'w') as f:
-            json.dump({
-                "categories": [
-                    {
-                        "name": "Transfers",
-                        "patterns": []
-                    }
-                ]
-            }, f, indent=4)
-            
     if not os.path.exists(CONFIG_FILE):
         print(f"INFO: {CONFIG_FILE} not found. Creating default template...")
         with open(CONFIG_FILE, 'w') as f:
             json.dump(DEFAULT_CONFIG, f, indent=4)
+            
+    yield
+
+app = FastAPI(lifespan=lifespan)
 
 # Mount frontend build directory (created via npm run build)
 frontend_dist = "frontend/dist"
@@ -93,15 +83,11 @@ app.add_middleware(
 
 @app.get("/api/categories")
 async def get_categories():
-    if not os.path.exists(CATEGORIES_FILE):
-        return {"categories": []}
-    with open(CATEGORIES_FILE, "r") as f:
-        return json.load(f)
+    return database.get_categories()
 
 @app.post("/api/categories")
 async def save_categories(data: Dict[str, Any]):
-    with open(CATEGORIES_FILE, "w") as f:
-        json.dump(data, f, indent=4)
+    database.save_categories(data)
     
     # Trigger database sync when categories change
     # This re-categorizes any transaction that hasn't been manually locked
@@ -147,8 +133,9 @@ async def process_statement(files: List[UploadFile] = File(...), bank_profile: s
     output_base = "combined" if len(temp_inputs) > 1 else temp_inputs[0].replace(".csv", "")
     
     try:
+        categories_data = database.get_categories()
         # results = debits + credits (categorized)
-        results, unmatched, duplicates = process.process_csv(temp_inputs, output_base, CATEGORIES_FILE, CONFIG_FILE, column_mapping)
+        results, unmatched, duplicates = process.process_csv(temp_inputs, output_base, categories_data, CONFIG_FILE, column_mapping)
             
         return {
             "results": results,

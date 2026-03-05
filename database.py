@@ -13,6 +13,8 @@ def get_db_connection():
 def init_db():
     conn = get_db_connection()
     cursor = conn.cursor()
+    
+    # Transactions  
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS transactions (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -34,16 +36,6 @@ def init_db():
         )
     ''')
     
-    # Simple migration for existing DBs
-    cursor.execute("PRAGMA table_info(transactions)")
-    columns = [row['name'] for row in cursor.fetchall()]
-    if 'balance' not in columns:
-        cursor.execute("ALTER TABLE transactions ADD COLUMN balance REAL")
-    if 'manual_category' not in columns:
-        cursor.execute("ALTER TABLE transactions ADD COLUMN manual_category TEXT")
-    if 'manual_title' not in columns:
-        cursor.execute("ALTER TABLE transactions ADD COLUMN manual_title TEXT")
-
     # Fix existing dates if they aren't in YYYY-MM-DD format
     cursor.execute("SELECT id, date, debit, credit, balance FROM transactions")
     for row in cursor.fetchall():
@@ -60,18 +52,42 @@ def init_db():
                 WHERE id = ?
             ''', (normalized_date, c_debit, c_credit, c_balance, row['id']))
 
+    # Categories
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS categories (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            name TEXT UNIQUE NOT NULL
+        )
+    ''')
+    
+    # Fuzzy filters
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS patterns (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            category_id INTEGER NOT NULL,
+            pattern TEXT NOT NULL,
+            title TEXT NOT NULL,
+            FOREIGN KEY(category_id) REFERENCES categories(id) ON DELETE CASCADE
+        )
+    ''')
+    
+    # Balance anchors
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS balance_anchors (
             date TEXT PRIMARY KEY,
             balance REAL NOT NULL
         )
     ''')
+    
+    # Budget targets
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS budget_targets (
             category TEXT PRIMARY KEY,
             target REAL NOT NULL
         )
     ''')
+    
+    # Budget plans
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS budget_plans (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -492,3 +508,48 @@ def get_recurring_transactions():
     
     conn.close()
     return potential_recurring
+
+def get_categories():
+    """Retrieve categories and patterns from the database in the format expected by the frontend."""
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    cursor.execute("SELECT id, name FROM categories")
+    cats = [dict(row) for row in cursor.fetchall()]
+    
+    result_cats = []
+    for cat in cats:
+        cursor.execute("SELECT pattern, title FROM patterns WHERE category_id = ?", (cat['id'],))
+        pats = cursor.fetchall()
+        patterns_list = [{p['pattern']: p['title']} for p in pats]
+        result_cats.append({"name": cat['name'], "patterns": patterns_list})
+        
+    conn.close()
+    
+    # Always ensure "Transfers" exists in the return payload, even if empty DB
+    if not any(c['name'] == 'Transfers' for c in result_cats):
+        result_cats.insert(0, {"name": "Transfers", "patterns": []})
+        
+    return {"categories": result_cats}
+
+def save_categories(data_dict):
+    """Save categories and patterns replacing existing ones."""
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    
+    cursor.execute("DELETE FROM patterns")
+    cursor.execute("DELETE FROM categories")
+    
+    for cat in data_dict.get('categories', []):
+        name = cat['name']
+        cursor.execute("INSERT INTO categories (name) VALUES (?)", (name,))
+        cat_id = cursor.lastrowid
+        
+        for pat in cat.get('patterns', []):
+            for pattern_str, title in pat.items():
+                cursor.execute(
+                    "INSERT INTO patterns (category_id, pattern, title) VALUES (?, ?, ?)",
+                    (cat_id, pattern_str, title)
+                )
+                
+    conn.commit()
+    conn.close()

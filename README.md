@@ -11,7 +11,7 @@ A simple too budgeting tool for personal finance.
 - **Transfer Pairing**: Intelligent detection of internal transfers between accounts.
 - **No Cloud!!!**: Budgie is designed to run entirely offline. Your data is stored locally in a SQLite database, and you own it.
 
-See HOWTO.md for detailed instructions on how to use the application.
+See [HOWTO](HOWTO.md) for detailed instructions on how to use the application.
 
 ## Getting Started
 
@@ -19,6 +19,7 @@ See HOWTO.md for detailed instructions on how to use the application.
 
 #### 1. Requirements
 Ensure you have Python 3.10+ and Node.js 18+ installed.
+Latest of both is preferred.
 
 #### 2. Backend Setup
 ```bash
@@ -54,11 +55,11 @@ Now open: [http://localhost:8000](http://localhost:8000)
 
 ### Option 2: Container
 
-`config.json`, `categories.json`, and `transactions.db` must exist before running the container.
+`config.json`, and `transactions.db` must exist before running the container.
 They are created on first-run when you run the application locally, but not when running in a container and must be passed
 
 ```bash
-mv categories.json.EXAMPLE categories.json
+mv env.EXAMPLE .env
 mv config.json.EXAMPLE config.json
 sqlite3 transactions.db "VACUUM;"
 ```
