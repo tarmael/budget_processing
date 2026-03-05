@@ -72,14 +72,20 @@ export default function Categories({
             const [movedPattern] = newCats[sourceIdx].patterns.splice(pIdx, 1);
             newCats[targetIdx].patterns.push(movedPattern);
             setCategories(newCats);
-            showMessage(`Moved to ${targetCatName}. Remember to Save Changes.`, "success");
+            showMessage(`Moved to ${targetCatName}`, "success");
         }
         setDraggedItem(null);
     };
 
     const handleAddCategory = () => {
-        if (newCategoryName.trim()) {
-            setCategories([{ name: newCategoryName.trim(), patterns: [] }, ...categories]);
+        const trimmedName = newCategoryName.trim();
+        if (trimmedName) {
+            const exists = categories.some(c => c.name.toLowerCase() === trimmedName.toLowerCase());
+            if (exists) {
+                showMessage(`Category "${trimmedName}" already exists`, "error");
+                return;
+            }
+            setCategories([{ name: trimmedName, patterns: [] }, ...categories]);
             setNewCategoryName("");
             setIsAddingCategory(false);
         }
