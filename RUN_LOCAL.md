@@ -1,4 +1,4 @@
-# Running Locally
+# Option 1: Running Locally
 
 To run the application locally without Docker:
 
@@ -37,6 +37,28 @@ python server.py
 
 Now open: [http://localhost:8000](http://localhost:8000)
 
-### 5. Why was it slow before?
-- **Docker builds**: Without a `.dockerignore`, Docker was copying your local `node_modules` and `.venv` (hundreds of MBs) into the container context every time. I've added a `.dockerignore` to fix this!
-- **Env vars**: Using the new `.env` file with `python-dotenv` ensures your local paths are correctly picked up without manually setting shell variables.
+# Option 2: Docker Container
+
+Podman:
+```bash
+# Build the image
+podman build --no-cache --network=host -t budget-processor .
+
+# Run the container
+podman run -p 8000:8000 --env-file .env budget-processor
+
+# Or with compose
+podman-compose up -d
+```
+
+Docker:
+```bash
+# Build the image
+docker build -t budget-processor .
+
+# Run the container
+docker run -p 8000:8000 --env-file .env budget-processor
+
+# Or with compose
+docker-compose up -d
+```

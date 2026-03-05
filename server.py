@@ -14,12 +14,53 @@ from dotenv import load_dotenv
 # Load local environment variables if .env exists
 load_dotenv()
 
+# Standardize path for Docker/Local flexibility
+CATEGORIES_FILE = os.getenv("CATEGORIES_PATH", "categories.json")
+CONFIG_FILE = os.getenv("CONFIG_PATH", "config.json")
+
+DEFAULT_CONFIG = {
+    "debit_columns": ["Date", "Description", "Category", "Title", "Debit"],
+    "credit_columns": ["Date", "Description", "Category", "Title", "Credit"],
+    "duplicates_columns": ["Date", "Description", "Category", "Title", "Debit", "Credit"],
+    "fy_start_month": 7,
+    "default_bank_profile": "",
+    "bank_profiles": {
+        "great_southern": {
+            "label": "Great Southern Bank",
+            "columns": {"date": "Date", "description": "Description", "debit": "Debit", "credit": "Credit", "balance": "Balance"}
+        },
+        "cba": {
+            "label": "Commonwealth Bank (CBA)",
+            "columns": {"date": "Date", "description": "Description", "debit": "Debit", "credit": "Credit", "balance": "Balance"}
+        },
+        "westpac": {
+            "label": "Westpac",
+            "columns": {"date": "Date", "description": "Narrative", "debit": "Debit Amount", "credit": "Credit Amount", "balance": "Balance"}
+        },
+        "anz": {
+            "label": "ANZ",
+            "columns": {"date": "Date", "description": "Details", "debit": "Debit", "credit": "Credit", "balance": "Balance"}
+        }
+    }
+}
+
 app = FastAPI()
 
 @app.on_event("startup")
 async def startup_event():
     print("INFO: Initializing database on startup...")
     database.init_db()
+    
+    # Initialize templates if they don't exist
+    if not os.path.exists(CATEGORIES_FILE):
+        print(f"INFO: {CATEGORIES_FILE} not found. Creating default template...")
+        with open(CATEGORIES_FILE, 'w') as f:
+            json.dump({"categories": []}, f, indent=4)
+            
+    if not os.path.exists(CONFIG_FILE):
+        print(f"INFO: {CONFIG_FILE} not found. Creating default template...")
+        with open(CONFIG_FILE, 'w') as f:
+            json.dump(DEFAULT_CONFIG, f, indent=4)
 
 # Mount frontend build directory (created via npm run build)
 frontend_dist = "frontend/dist"
@@ -43,10 +84,6 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Standardize path for Docker/Local flexibility
-CATEGORIES_FILE = os.getenv("CATEGORIES_PATH", "categories.json")
-CONFIG_FILE = os.getenv("CONFIG_PATH", "config.json")
-
 @app.get("/api/categories")
 async def get_categories():
     if not os.path.exists(CATEGORIES_FILE):
@@ -67,37 +104,12 @@ async def save_categories(data: Dict[str, Any]):
 
 @app.get("/api/config")
 async def get_config():
-    default_config = {
-        "debit_columns": ["Date", "Description", "Category", "Title", "Debit"],
-        "credit_columns": ["Date", "Description", "Category", "Title", "Credit"],
-        "duplicates_columns": ["Date", "Description", "Category", "Title", "Debit", "Credit"],
-        "fy_start_month": 7,
-        "default_bank_profile": "",
-        "bank_profiles": {
-            "great_southern": {
-                "label": "Great Southern Bank",
-                "columns": {"date": "Date", "description": "Description", "debit": "Debit", "credit": "Credit", "balance": "Balance"}
-            },
-            "cba": {
-                "label": "Commonwealth Bank (CBA)",
-                "columns": {"date": "Date", "description": "Description", "debit": "Debit", "credit": "Credit", "balance": "Balance"}
-            },
-            "westpac": {
-                "label": "Westpac",
-                "columns": {"date": "Date", "description": "Narrative", "debit": "Debit Amount", "credit": "Credit Amount", "balance": "Balance"}
-            },
-            "anz": {
-                "label": "ANZ",
-                "columns": {"date": "Date", "description": "Details", "debit": "Debit", "credit": "Credit", "balance": "Balance"}
-            }
-        }
-    }
     if not os.path.exists(CONFIG_FILE):
-        return default_config
+        return DEFAULT_CONFIG
     with open(CONFIG_FILE, "r") as f:
         config = json.load(f)
         # Ensure new keys are present
-        for k, v in default_config.items():
+        for k, v in DEFAULT_CONFIG.items():
             if k not in config: config[k] = v
         return config
 

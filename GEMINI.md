@@ -57,9 +57,5 @@ The processor generates several specialized CSV files sorted by date:
 ### Roadmap
 1. Yearly Overview / Multi-Year Comparison
 You now have FY filtering, but there's no side-by-side FY comparison view (e.g. "How does FY 2024/25 spending compare to FY 2025/26?"). A year-over-year trend would be powerful.
-2. Budget Targets / Alerts
-There's no way to set a spending target per category (e.g. "Groceries: $600/month") and see whether you're on track or over.
-3. Recurring Transaction Detection
-The system doesn't identify recurring transactions (rent, salary, subscriptions). Flagging "this $X charge appears every month" would help with budgeting predictions and spotting missed payments.
-6. Undo for Manual Overrides & Deletions
+2. Undo for Manual Overrides & Deletions
 Once you delete a transaction, there's no way to undo it.
