@@ -24,7 +24,7 @@ Latest of both is preferred.
 #### 2. Backend Setup
 ```bash
 # Create and activate virtual environment
-python -m venv .venv
+python3 -m venv .venv
 source .venv/bin/activate
 
 # Install dependencies
