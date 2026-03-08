@@ -79,14 +79,6 @@ def init_db():
         )
     ''')
     
-    # Budget targets
-    cursor.execute('''
-        CREATE TABLE IF NOT EXISTS budget_targets (
-            category TEXT PRIMARY KEY,
-            target REAL NOT NULL
-        )
-    ''')
-    
     # Budget plans
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS budget_plans (
@@ -322,6 +314,30 @@ def get_dashboard_data():
             monthly_map[m]["expenses"] += ec
             monthly_map[m]["expense_cats"][cat] = ec
             expense_labels.add(cat)
+
+    # 3. Efficiently pre-calculate versioned budget plan targets for ALL months
+    # instead of looping and doing N database queries.
+    try:
+        cursor.execute("SELECT effective_from, category, type, planned_amount FROM budget_plans ORDER BY effective_from ASC")
+        all_plans = [dict(r) for r in cursor.fetchall()]
+    except sqlite3.OperationalError:
+        all_plans = []
+        
+    for m in months:
+        # For each month, find the "active" plan version (latest effective_from <= month)
+        # category -> amount
+        targets_map = {}
+        # Since all_plans is sorted by effective_from ASC, we can just keep 
+        # updating the map as we find matches.
+        for plan in all_plans:
+            if plan['effective_from'] <= m:
+                # Up to this month, this is the current target for this category/type
+                # Expense Breakdown only cares about 'expense' type mostly, but we store all.
+                targets_map[plan['category']] = plan['planned_amount']
+            else:
+                # Plans are sorted, so any subsequent plans are for future months
+                break
+        monthly_map[m]["budget_targets"] = targets_map
             
     conn.close()
     
@@ -353,35 +369,7 @@ def delete_transaction(transaction_id):
     conn.commit()
     conn.close()
 
-def get_budget_targets():
-    """Retrieve all budget targets."""
-    conn = get_db_connection()
-    cursor = conn.cursor()
-    try:
-        cursor.execute("SELECT category, target FROM budget_targets")
-        targets = {row['category']: row['target'] for row in cursor.fetchall()}
-    except sqlite3.OperationalError:
-        targets = {}
-    conn.close()
-    return targets
-
-def set_budget_target(category, target):
-    """Set or update a budget target for a category."""
-    conn = get_db_connection()
-    cursor = conn.cursor()
-    try:
-        cursor.execute('''
-            INSERT OR REPLACE INTO budget_targets (category, target) 
-            VALUES (?, ?)
-        ''', (category, float(target)))
-    except sqlite3.OperationalError:
-        init_db()
-        cursor.execute('''
-            INSERT OR REPLACE INTO budget_targets (category, target) 
-            VALUES (?, ?)
-        ''', (category, float(target)))
-    conn.commit()
-    conn.close()
+# --- Budget Plan (versioned, effective-date) Logic ---
 
 def get_budget_plan_for_month(month_str):
     """

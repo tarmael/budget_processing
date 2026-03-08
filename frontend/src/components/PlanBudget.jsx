@@ -92,11 +92,13 @@ export default function PlanBudget({ API_BASE, showMessage }) {
     }, [API_BASE]);
 
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    useEffect(() => { fetchDashboard(); fetchVersions(); }, []);
+    useEffect(() => {
+        fetchDashboard();
+        fetchVersions();
+        fetchPlan(effectiveFrom);
+    }, []);
     // eslint-disable-next-line react-hooks/exhaustive-deps
     useEffect(() => { fetchActuals(actualMonth); }, [actualMonth]);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    useEffect(() => { fetchPlan(effectiveFrom); }, [effectiveFrom]);
 
     // ── Derived: summary data for the selected actual month ──────────
     const actualMonthData = dashboardData?.monthly?.find(m => m.month === actualMonth);
@@ -201,7 +203,8 @@ export default function PlanBudget({ API_BASE, showMessage }) {
                 onClick={onClick}
                 style={{
                     display: 'grid', gridTemplateColumns: '1fr auto',
-                    alignItems: 'center', padding: '0.45rem 0.75rem',
+                    alignItems: 'center', padding: '0 0.75rem',
+                    height: '40px',
                     borderRadius: '0.4rem', cursor: 'pointer',
                     background: isActive ? 'rgba(99,102,241,0.15)' : 'transparent',
                     border: isActive ? '1px solid rgba(99,102,241,0.4)' : '1px solid transparent',
@@ -303,7 +306,7 @@ export default function PlanBudget({ API_BASE, showMessage }) {
                                 background: v === planEffectiveDate ? 'rgba(99,102,241,0.15)' : 'rgba(255,255,255,0.04)',
                                 color: v === planEffectiveDate ? 'var(--primary)' : 'var(--text-muted)',
                             }}
-                            onClick={() => setEffectiveFrom(v)}
+                            onClick={() => { setEffectiveFrom(v); fetchPlan(v); }}
                         >
                             {monthLabel(v)}
                         </span>
@@ -378,7 +381,7 @@ export default function PlanBudget({ API_BASE, showMessage }) {
 
                     <SectionHeader icon={TrendingUp} label="Income" colorClass="text-income" />
                     {incomeCategories.map(cat => (
-                        <div key={cat} style={{ display: 'grid', gridTemplateColumns: '1fr auto', alignItems: 'center', padding: '0.35rem 0.75rem', gap: '0.5rem' }}>
+                        <div key={cat} style={{ display: 'grid', gridTemplateColumns: '1fr auto', alignItems: 'center', padding: '0 0.75rem', height: '40px', gap: '0.5rem' }}>
                             <span style={{ fontSize: '0.85rem', color: 'var(--text-muted)' }}>{cat}</span>
                             <input
                                 type="number"
@@ -387,9 +390,9 @@ export default function PlanBudget({ API_BASE, showMessage }) {
                                 value={getPlan('income', cat) ?? ''}
                                 onChange={e => updatePlanRow('income', cat, e.target.value)}
                                 style={{
-                                    width: '110px', background: 'rgba(0,0,0,0.3)',
+                                    width: '110px', height: '30px', background: 'rgba(0,0,0,0.3)',
                                     border: '1px solid var(--border)', borderRadius: '0.35rem',
-                                    padding: '0.3rem 0.5rem', color: 'var(--income)',
+                                    padding: '0 0.5rem', color: 'var(--income)',
                                     textAlign: 'right', fontSize: '0.85rem', fontWeight: 600,
                                 }}
                             />
@@ -403,7 +406,7 @@ export default function PlanBudget({ API_BASE, showMessage }) {
                     <div style={{ marginTop: '1.25rem' }}>
                         <SectionHeader icon={BarChart3} label="Expenses" colorClass="text-expense" />
                         {expenseCategories.map(cat => (
-                            <div key={cat} style={{ display: 'grid', gridTemplateColumns: '1fr auto', alignItems: 'center', padding: '0.35rem 0.75rem', gap: '0.5rem' }}>
+                            <div key={cat} style={{ display: 'grid', gridTemplateColumns: '1fr auto', alignItems: 'center', padding: '0 0.75rem', height: '40px', gap: '0.5rem' }}>
                                 <span style={{ fontSize: '0.85rem', color: 'var(--text-muted)' }}>{cat}</span>
                                 <input
                                     type="number"
@@ -412,9 +415,9 @@ export default function PlanBudget({ API_BASE, showMessage }) {
                                     value={getPlan('expense', cat) ?? ''}
                                     onChange={e => updatePlanRow('expense', cat, e.target.value)}
                                     style={{
-                                        width: '110px', background: 'rgba(0,0,0,0.3)',
+                                        width: '110px', height: '30px', background: 'rgba(0,0,0,0.3)',
                                         border: '1px solid var(--border)', borderRadius: '0.35rem',
-                                        padding: '0.3rem 0.5rem', color: 'var(--expense)',
+                                        padding: '0 0.5rem', color: 'var(--expense)',
                                         textAlign: 'right', fontSize: '0.85rem', fontWeight: 600,
                                     }}
                                 />
@@ -445,9 +448,9 @@ export default function PlanBudget({ API_BASE, showMessage }) {
                     {incomeCategories.map(cat => {
                         const actual = getActualIncomeCat(cat);
                         const plan = Number(getPlan('income', cat)) || 0;
-                        const delta = actual - plan;
+                        const delta = plan - actual;
                         return (
-                            <div key={cat} style={{ display: 'grid', gridTemplateColumns: '1fr auto', alignItems: 'center', padding: '0.45rem 0.75rem', gap: '0.5rem' }}>
+                            <div key={cat} style={{ display: 'grid', gridTemplateColumns: '1fr auto', alignItems: 'center', padding: '0 0.75rem', height: '40px', gap: '0.5rem' }}>
                                 <span style={{ fontSize: '0.85rem', color: 'var(--text-muted)' }}>{cat}</span>
                                 <span style={variantStyle(delta, true)}>{deltaSign(delta)}</span>
                             </div>
@@ -455,8 +458,8 @@ export default function PlanBudget({ API_BASE, showMessage }) {
                     })}
                     <div style={{ display: 'flex', justifyContent: 'space-between', padding: '0.5rem 0.75rem', borderTop: '1px solid var(--border)', marginTop: '0.4rem', fontWeight: 700 }}>
                         <span>Total</span>
-                        <span style={variantStyle(totalActualIncome - totalPlanIncome, true)}>
-                            {deltaSign(totalActualIncome - totalPlanIncome)}
+                        <span style={variantStyle(totalPlanIncome - totalActualIncome, true)}>
+                            {deltaSign(totalPlanIncome - totalActualIncome)}
                         </span>
                     </div>
 
@@ -465,9 +468,9 @@ export default function PlanBudget({ API_BASE, showMessage }) {
                         {expenseCategories.map(cat => {
                             const actual = getActualExpenseCat(cat);
                             const plan = Number(getPlan('expense', cat)) || 0;
-                            const delta = actual - plan;
+                            const delta = plan - actual;
                             return (
-                                <div key={cat} style={{ display: 'grid', gridTemplateColumns: '1fr auto', alignItems: 'center', padding: '0.45rem 0.75rem', gap: '0.5rem' }}>
+                                <div key={cat} style={{ display: 'grid', gridTemplateColumns: '1fr auto', alignItems: 'center', padding: '0 0.75rem', height: '40px', gap: '0.5rem' }}>
                                     <span style={{ fontSize: '0.85rem', color: 'var(--text-muted)' }}>{cat}</span>
                                     <span style={variantStyle(delta, false)}>{deltaSign(delta)}</span>
                                 </div>
@@ -475,8 +478,8 @@ export default function PlanBudget({ API_BASE, showMessage }) {
                         })}
                         <div style={{ display: 'flex', justifyContent: 'space-between', padding: '0.5rem 0.75rem', borderTop: '1px solid var(--border)', marginTop: '0.4rem', fontWeight: 700 }}>
                             <span>Total</span>
-                            <span style={variantStyle(totalActualExpenses - totalPlanExpenses, false)}>
-                                {deltaSign(totalActualExpenses - totalPlanExpenses)}
+                            <span style={variantStyle(totalPlanExpenses - totalActualExpenses, false)}>
+                                {deltaSign(totalPlanExpenses - totalActualExpenses)}
                             </span>
                         </div>
                     </div>
@@ -486,10 +489,10 @@ export default function PlanBudget({ API_BASE, showMessage }) {
                         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.3rem' }}>
                             <span style={{ fontWeight: 700 }}>Net Variance</span>
                             <span style={variantStyle(
-                                (totalActualIncome - totalActualExpenses) - (totalPlanIncome - totalPlanExpenses),
+                                (totalPlanIncome - totalPlanExpenses) - (totalActualIncome - totalActualExpenses),
                                 true
                             )}>
-                                {deltaSign((totalActualIncome - totalActualExpenses) - (totalPlanIncome - totalPlanExpenses))}
+                                {deltaSign((totalPlanIncome - totalPlanExpenses) - (totalActualIncome - totalActualExpenses))}
                             </span>
                         </div>
                         <div style={{ fontSize: '0.72rem', color: 'var(--text-muted)' }}>
@@ -614,7 +617,7 @@ export default function PlanBudget({ API_BASE, showMessage }) {
                                         <div style={{ display: 'flex', gap: '0.4rem' }}>
                                             <button
                                                 className="btn btn-ghost btn-sm"
-                                                onClick={() => { setEffectiveFrom(v); setIsManagingPlans(false); }}
+                                                onClick={() => { setEffectiveFrom(v); fetchPlan(v); setIsManagingPlans(false); }}
                                                 title="Load this plan"
                                             >
                                                 Load

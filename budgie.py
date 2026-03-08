@@ -190,16 +190,6 @@ async def delete_transaction(transaction_id: int):
     database.delete_transaction(transaction_id)
     return {"status": "success"}
 
-@app.get("/api/budget_targets")
-async def get_budget_targets():
-    return database.get_budget_targets()
-
-@app.post("/api/budget_targets")
-async def save_budget_target(data: Dict[str, Any]):
-    # Expects: { "category": "Groceries", "target": 600.0 }
-    database.set_budget_target(data['category'], data['target'])
-    return {"status": "success"}
-
 @app.get("/api/recurring_transactions")
 async def get_recurring_transactions():
     return database.get_recurring_transactions()

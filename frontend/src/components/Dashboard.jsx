@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import {
     Download, ChevronRight, ChevronLeft, Calendar, BarChart3, TrendingUp, Wallet, ArrowLeft, Trash2, Search,
     ChevronsUpDown, ChevronUp, ChevronDown
@@ -11,7 +11,6 @@ import {
 
 export default function Dashboard({ categories, showMessage, API_BASE }) {
     const [dashboardData, setDashboardData] = useState(null);
-    const [budgetTargets, setBudgetTargets] = useState({});
     const [recurringTransactions, setRecurringTransactions] = useState([]);
     const [selectedMonth, setSelectedMonth] = useState(null);
     const [dashboardMode, setDashboardMode] = useState('monthly');
@@ -135,32 +134,18 @@ export default function Dashboard({ categories, showMessage, API_BASE }) {
 
     const fetchDashboardData = async () => {
         try {
-            const [dashRes, targetsRes, recurringRes] = await Promise.all([
+            const [dashRes, recurringRes] = await Promise.all([
                 fetch(`${API_BASE}/dashboard`),
-                fetch(`${API_BASE}/budget_targets`),
                 fetch(`${API_BASE}/recurring_transactions`)
             ]);
             setDashboardData(await dashRes.json());
-            setBudgetTargets(await targetsRes.json());
             setRecurringTransactions(await recurringRes.json());
         } catch (err) {
             showMessage("Failed to fetch dashboard data", "error");
         }
     };
 
-    const updateBudgetTarget = async (category, target) => {
-        try {
-            await fetch(`${API_BASE}/budget_targets`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ category, target })
-            });
-            setBudgetTargets(prev => ({ ...prev, [category]: target }));
-            showMessage("Target updated", "success");
-        } catch (err) {
-            showMessage("Failed to save target", "error");
-        }
-    };
+
 
     const fetchMonthTransactions = async (month) => {
         try {
@@ -238,7 +223,7 @@ export default function Dashboard({ categories, showMessage, API_BASE }) {
         }
     };
 
-    const getWorthData = () => {
+    const worthData = useMemo(() => {
         if (!dashboardData?.monthly || !selectedFY) return [];
         const fyMonthList = getFYMonths(selectedFY, fyStartMonth);
         const fyMonthSet = new Set(fyMonthList);
@@ -289,7 +274,54 @@ export default function Dashboard({ categories, showMessage, API_BASE }) {
 
         // Return only the months requested for the FY
         return monthResults.filter(m => fyMonthSet.has(m.month));
-    };
+    }, [dashboardData, selectedFY, balanceAnchors, fyStartMonth]);
+
+    const yearlyData = useMemo(() => {
+        if (!dashboardData?.monthly) return [];
+        const fyMap = {};
+        const sortedAnchors = [...balanceAnchors].sort((a, b) => a.date.localeCompare(b.date));
+
+        const allMonthsSorted = [...dashboardData.monthly].sort((a, b) => a.month.localeCompare(b.month));
+
+        let runningBalance = 0;
+
+        allMonthsSorted.forEach(m => {
+            const fy = getFYForDate(new Date(m.month + '-01'), fyStartMonth);
+
+            const applicableAnchors = sortedAnchors.filter(a => a.date.substring(0, 7) <= m.month);
+            if (applicableAnchors.length > 0) {
+                const latestAnchor = applicableAnchors[applicableAnchors.length - 1];
+                if (latestAnchor.date.substring(0, 7) === m.month) {
+                    runningBalance = latestAnchor.balance;
+                }
+            }
+
+            const startBal = runningBalance;
+            runningBalance += (m.income - m.expenses);
+
+            if (!fyMap[fy]) {
+                fyMap[fy] = {
+                    fy, name: getFYLabel(fy, fyStartMonth),
+                    income: 0, expenses: 0,
+                    startBalance: startBal, endBalance: runningBalance,
+                    income_cats: {}, expense_cats: {}
+                };
+            }
+            fyMap[fy].income += m.income;
+            fyMap[fy].expenses += m.expenses;
+            fyMap[fy].endBalance = runningBalance;
+            Object.entries(m.income_cats || {}).forEach(([cat, val]) => { fyMap[fy].income_cats[cat] = (fyMap[fy].income_cats[cat] || 0) + val; });
+            Object.entries(m.expense_cats || {}).forEach(([cat, val]) => { fyMap[fy].expense_cats[cat] = (fyMap[fy].expense_cats[cat] || 0) + val; });
+        });
+        return Object.values(fyMap).sort((a, b) => a.fy - b.fy);
+    }, [dashboardData, balanceAnchors, fyStartMonth]);
+
+    // Create a O(1) month data map for lightning fast table rendering
+    const monthDataTable = useMemo(() => {
+        const map = {};
+        (dashboardData?.monthly || []).forEach(m => { map[m.month] = m; });
+        return map;
+    }, [dashboardData]);
 
     const CustomTrendTooltip = ({ active, payload, label }) => {
         if (active && payload && payload.length) {
@@ -317,52 +349,9 @@ export default function Dashboard({ categories, showMessage, API_BASE }) {
         return null;
     };
 
-    const worthData = getWorthData();
 
-    const getYearlyData = () => {
-        if (!dashboardData?.monthly) return [];
-        const sortedMonthly = [...dashboardData.monthly].sort((a, b) => a.month.localeCompare(b.month));
-        const sortedAnchors = [...balanceAnchors].sort((a, b) => a.date.localeCompare(b.date));
 
-        let runningBalance = 0;
-        const fyMap = {};
 
-        sortedMonthly.forEach(m => {
-            const parts = m.month.split('-');
-            const targetMonthStr = m.month;
-
-            // Check for anchors explicitly set in this month to update the running balance
-            const applicableAnchors = sortedAnchors.filter(a => a.date.substring(0, 7) <= targetMonthStr);
-            if (applicableAnchors.length > 0) {
-                const latestAnchor = applicableAnchors[applicableAnchors.length - 1];
-                if (latestAnchor.date.substring(0, 7) === targetMonthStr) {
-                    runningBalance = latestAnchor.balance;
-                }
-            }
-
-            const date = new Date(parseInt(parts[0]), parseInt(parts[1]) - 1, 1);
-            const fy = getFYForDate(date, fyStartMonth);
-            const startBal = runningBalance;
-            runningBalance += (m.income - m.expenses);
-
-            if (!fyMap[fy]) {
-                fyMap[fy] = {
-                    fy, name: getFYLabel(fy, fyStartMonth),
-                    income: 0, expenses: 0,
-                    startBalance: startBal, endBalance: runningBalance,
-                    income_cats: {}, expense_cats: {}
-                };
-            }
-            fyMap[fy].income += m.income;
-            fyMap[fy].expenses += m.expenses;
-            fyMap[fy].endBalance = runningBalance;
-            Object.entries(m.income_cats || {}).forEach(([cat, val]) => { fyMap[fy].income_cats[cat] = (fyMap[fy].income_cats[cat] || 0) + val; });
-            Object.entries(m.expense_cats || {}).forEach(([cat, val]) => { fyMap[fy].expense_cats[cat] = (fyMap[fy].expense_cats[cat] || 0) + val; });
-        });
-        return Object.values(fyMap).sort((a, b) => a.fy - b.fy);
-    };
-
-    const yearlyData = getYearlyData();
 
     const exportDashboardCSV = () => {
         if (!dashboardData || !selectedFY) return;
@@ -671,16 +660,12 @@ export default function Dashboard({ categories, showMessage, API_BASE }) {
                                         </thead>
                                         <tbody>
                                             {(dashboardData?.income_labels || []).filter(label =>
-                                                worthData.some(m => {
-                                                    const md = (dashboardData?.monthly || []).find(x => x.month === m.month);
-                                                    return md?.income_cats?.[label] > 0;
-                                                })
+                                                worthData.some(m => monthDataTable[m.month]?.income_cats?.[label] > 0)
                                             ).map(label => (
                                                 <tr key={label}>
                                                     <td className="row-label">{label}</td>
                                                     {worthData.map(m => {
-                                                        const md = (dashboardData?.monthly || []).find(x => x.month === m.month);
-                                                        const val = md?.income_cats?.[label] || 0;
+                                                        const val = monthDataTable[m.month]?.income_cats?.[label] || 0;
                                                         return <td key={m.month} className={val > 0 ? "text-income" : ""}>{val > 0 ? `$${val.toLocaleString()}` : '-'}</td>;
                                                     })}
                                                 </tr>
@@ -709,17 +694,14 @@ export default function Dashboard({ categories, showMessage, API_BASE }) {
                                         </thead>
                                         <tbody>
                                             {(dashboardData?.expense_labels || []).filter(label =>
-                                                worthData.some(m => {
-                                                    const md = (dashboardData?.monthly || []).find(x => x.month === m.month);
-                                                    return md?.expense_cats?.[label] > 0;
-                                                })
+                                                worthData.some(m => monthDataTable[m.month]?.expense_cats?.[label] > 0)
                                             ).map(label => (
                                                 <tr key={label}>
                                                     <td className="row-label">{label}</td>
                                                     {worthData.map(m => {
-                                                        const md = (dashboardData?.monthly || []).find(x => x.month === m.month);
+                                                        const md = monthDataTable[m.month];
                                                         const val = md?.expense_cats?.[label] || 0;
-                                                        const target = Number(budgetTargets[label]);
+                                                        const target = Number(md?.budget_targets?.[label] || 0);
                                                         const isOverBudget = target > 0 && val > target;
                                                         return (
                                                             <td key={m.month} className={val > 0 ? "text-expense" : ""}>
@@ -739,38 +721,9 @@ export default function Dashboard({ categories, showMessage, API_BASE }) {
                                 </div>
                             </div>
 
-                            <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) minmax(0, 1fr)', gap: '1.5rem', marginBottom: '1.5rem' }}>
-                                <div className="glass-card">
-                                    <h3 className="mb-1" style={{ color: 'var(--text-muted)' }}>Budget Targets</h3>
-                                    <div className="table-container" style={{ maxHeight: '400px', overflowY: 'auto' }}>
-                                        <table className="dashboard-table">
-                                            <thead>
-                                                <tr>
-                                                    <th style={{ textAlign: 'left' }}>Category</th>
-                                                    <th style={{ textAlign: 'right' }}>Target ($ / month)</th>
-                                                </tr>
-                                            </thead>
-                                            <tbody>
-                                                {(dashboardData?.expense_labels || []).map(label => (
-                                                    <tr key={label}>
-                                                        <td>{label}</td>
-                                                        <td style={{ textAlign: 'right' }}>
-                                                            <input
-                                                                type="number"
-                                                                value={budgetTargets[label] || ''}
-                                                                placeholder="0.00"
-                                                                style={{ width: '100px', background: 'rgba(0,0,0,0.2)', border: '1px solid var(--border)', padding: '0.3rem', color: 'var(--text)', borderRadius: '0.25rem', textAlign: 'right' }}
-                                                                onBlur={(e) => updateBudgetTarget(label, e.target.value)}
-                                                                onChange={(e) => setBudgetTargets(prev => ({ ...prev, [label]: e.target.value }))}
-                                                            />
-                                                        </td>
-                                                    </tr>
-                                                ))}
-                                            </tbody>
-                                        </table>
-                                    </div>
-                                </div>
 
+
+                            <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr)', gap: '1.5rem', marginBottom: '1.5rem' }}>
                                 <div className="glass-card">
                                     <h3 className="mb-1" style={{ color: 'var(--text-muted)' }}>Detected Recurring Transactions</h3>
                                     <div className="table-container" style={{ maxHeight: '400px', overflowY: 'auto' }}>
