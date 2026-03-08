@@ -665,8 +665,16 @@ export default function Dashboard({ categories, showMessage, API_BASE }) {
                                                 <tr key={label}>
                                                     <td className="row-label">{label}</td>
                                                     {worthData.map(m => {
-                                                        const val = monthDataTable[m.month]?.income_cats?.[label] || 0;
-                                                        return <td key={m.month} className={val > 0 ? "text-income" : ""}>{val > 0 ? `$${val.toLocaleString()}` : '-'}</td>;
+                                                        const md = monthDataTable[m.month];
+                                                        const val = md?.income_cats?.[label] || 0;
+                                                        const target = Number(md?.budget_targets?.[label] || 0);
+                                                        const isUnderTarget = target > 0 && val < target;
+                                                        return (
+                                                            <td key={m.month} className={val > 0 ? "text-income" : ""}>
+                                                                {val > 0 ? `$${val.toLocaleString()}` : '-'}
+                                                                {isUnderTarget && <span title={`Target: $${target}`} style={{ fontSize: '0.75rem', marginLeft: '0.3rem', cursor: 'help' }}>⚠️</span>}
+                                                            </td>
+                                                        );
                                                     })}
                                                 </tr>
                                             ))}

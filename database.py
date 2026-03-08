@@ -323,21 +323,27 @@ def get_dashboard_data():
     except sqlite3.OperationalError:
         all_plans = []
         
+    # 3. Correctly group budget versions and apply them as snapshots.
+    # A newer 'effective_from' plan COMPLETELY replaces previous plan targets for that month.
+    plan_versions = {} # effective_from -> { category: planned_amount }
+    for p in all_plans:
+        v = p['effective_from']
+        if v not in plan_versions: plan_versions[v] = {}
+        plan_versions[v][p['category']] = p['planned_amount']
+    
+    sorted_v_keys = sorted(plan_versions.keys())
+        
     for m in months:
-        # For each month, find the "active" plan version (latest effective_from <= month)
-        # category -> amount
-        targets_map = {}
-        # Since all_plans is sorted by effective_from ASC, we can just keep 
-        # updating the map as we find matches.
-        for plan in all_plans:
-            if plan['effective_from'] <= m:
-                # Up to this month, this is the current target for this category/type
-                # Expense Breakdown only cares about 'expense' type mostly, but we store all.
-                targets_map[plan['category']] = plan['planned_amount']
+        # Find the most recent plan version defined on or before month 'm'
+        latest_v = None
+        for v in sorted_v_keys:
+            if v <= m:
+                latest_v = v
             else:
-                # Plans are sorted, so any subsequent plans are for future months
                 break
-        monthly_map[m]["budget_targets"] = targets_map
+        
+        # We use the entire snapshot of the latest version, no accumulation
+        monthly_map[m]["budget_targets"] = plan_versions.get(latest_v, {})
             
     conn.close()
     
