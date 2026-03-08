@@ -2,7 +2,7 @@ import React, { useState, useEffect, useCallback } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
     CalendarDays, TrendingUp, BarChart3, Save, ChevronDown,
-    ArrowUpCircle, ArrowDownCircle, Info, Check, Pencil
+    ArrowUpCircle, ArrowDownCircle, Info, Check, Pencil, Trash2, Wallet
 } from 'lucide-react';
 
 const fmt = (n) => `$${Math.abs(Number(n) || 0).toLocaleString('en-AU', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
@@ -52,6 +52,7 @@ export default function PlanBudget({ API_BASE, showMessage }) {
     const [isSaving, setIsSaving] = useState(false);
     const [savedBadge, setSavedBadge] = useState(false);
     const [searchTx, setSearchTx] = useState('');
+    const [isManagingPlans, setIsManagingPlans] = useState(false);
 
     // ── Fetch orchestration ──────────────────────────────────────────
     const fetchDashboard = useCallback(async () => {
@@ -90,9 +91,12 @@ export default function PlanBudget({ API_BASE, showMessage }) {
         } catch { /* non-critical */ }
     }, [API_BASE]);
 
-    useEffect(() => { fetchDashboard(); fetchVersions(); }, [fetchDashboard, fetchVersions]);
-    useEffect(() => { fetchActuals(actualMonth); }, [actualMonth, fetchActuals]);
-    useEffect(() => { fetchPlan(actualMonth); }, [actualMonth, fetchPlan]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    useEffect(() => { fetchDashboard(); fetchVersions(); }, []);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    useEffect(() => { fetchActuals(actualMonth); }, [actualMonth]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    useEffect(() => { fetchPlan(effectiveFrom); }, [effectiveFrom]);
 
     // ── Derived: summary data for the selected actual month ──────────
     const actualMonthData = dashboardData?.monthly?.find(m => m.month === actualMonth);
@@ -109,8 +113,8 @@ export default function PlanBudget({ API_BASE, showMessage }) {
     const totalActualIncome = actualMonthData?.income || 0;
     const totalActualExpenses = actualMonthData?.expenses || 0;
 
-    const totalPlanIncome = incomeCategories.reduce((s, c) => s + (getPlan('income', c) ?? getActualIncomeCat(c)), 0);
-    const totalPlanExpenses = expenseCategories.reduce((s, c) => s + (getPlan('expense', c) ?? getActualExpenseCat(c)), 0);
+    const totalPlanIncome = incomeCategories.reduce((s, c) => s + (Number(getPlan('income', c)) || 0), 0);
+    const totalPlanExpenses = expenseCategories.reduce((s, c) => s + (Number(getPlan('expense', c)) || 0), 0);
 
     // ── Plan editing ─────────────────────────────────────────────────
     const updatePlanRow = (type, cat, val) => {
@@ -128,8 +132,8 @@ export default function PlanBudget({ API_BASE, showMessage }) {
     const savePlan = async () => {
         setIsSaving(true);
         const items = [
-            ...incomeCategories.map(c => ({ category: c, type: 'income', planned_amount: getPlan('income', c) ?? getActualIncomeCat(c) })),
-            ...expenseCategories.map(c => ({ category: c, type: 'expense', planned_amount: getPlan('expense', c) ?? getActualExpenseCat(c) })),
+            ...incomeCategories.map(c => ({ category: c, type: 'income', planned_amount: Number(getPlan('income', c)) || 0 })),
+            ...expenseCategories.map(c => ({ category: c, type: 'expense', planned_amount: Number(getPlan('expense', c)) || 0 })),
         ];
         try {
             await fetch(`${API_BASE}/budget_plan`, {
@@ -140,12 +144,25 @@ export default function PlanBudget({ API_BASE, showMessage }) {
             setSavedBadge(true);
             setTimeout(() => setSavedBadge(false), 2500);
             fetchVersions();
-            // Re-fetch plan for the current actual month so the loaded version updates
-            fetchPlan(actualMonth);
+            // Re-fetch plan for the current effective month so the loaded version updates
+            fetchPlan(effectiveFrom);
         } catch {
             showMessage('Failed to save plan', 'error');
         } finally {
             setIsSaving(false);
+        }
+    };
+
+    const deletePlan = async (month) => {
+        if (!window.confirm(`Are you sure you want to delete the plan effective from ${monthLabel(month)}?`)) return;
+        try {
+            await fetch(`${API_BASE}/budget_plan/${month}`, { method: 'DELETE' });
+            fetchVersions();
+            // If we just deleted the plan we are currently looking at or the one that's active for the selected month, reload
+            fetchPlan(effectiveFrom);
+            showMessage('Plan deleted', 'success');
+        } catch {
+            showMessage('Failed to delete plan', 'error');
         }
     };
 
@@ -177,7 +194,7 @@ export default function PlanBudget({ API_BASE, showMessage }) {
     );
 
     const CategoryRow = ({ type, cat, actualVal, isIncome, onClick, isActive }) => {
-        const plan = getPlan(type, cat) ?? actualVal;
+        const plan = Number(getPlan(type, cat)) || 0;
         const delta = actualVal - plan;
         return (
             <div
@@ -220,17 +237,22 @@ export default function PlanBudget({ API_BASE, showMessage }) {
                     )}
                 </div>
 
-                <div style={{ display: 'flex', gap: '0.75rem', alignItems: 'center', flexWrap: 'wrap' }}>
+                <div style={{ display: 'flex', gap: '0.75rem', alignItems: 'flex-start', flexWrap: 'wrap' }}>
                     {/* Actual month picker */}
                     <div style={{ display: 'flex', flexDirection: 'column', gap: '0.15rem' }}>
-                        <label style={{ fontSize: '0.65rem', color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.06em', paddingLeft: '0.2rem' }}>Actual Month</label>
-                        <select
-                            className="fy-select"
-                            value={actualMonth}
-                            onChange={e => { setActualMonth(e.target.value); setActiveFilter(null); }}
-                        >
-                            {allMonths.map(m => <option key={m} value={m}>{monthLabel(m)}</option>)}
-                        </select>
+                        <label style={{ fontSize: '0.65rem', color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.06em', paddingLeft: '0.2rem' }}>Template From</label>
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: '0.25rem' }}>
+                            <select
+                                className="fy-select"
+                                value={actualMonth}
+                                onChange={e => { setActualMonth(e.target.value); setActiveFilter(null); }}
+                            >
+                                {allMonths.map(m => <option key={m} value={m}>{monthLabel(m)}</option>)}
+                            </select>
+                            <button className="btn btn-ghost btn-sm" onClick={seedFromActuals} title="Copy this month's values into the plan column" style={{ marginTop: '0.2rem', padding: '0.25rem 0.5rem', justifyContent: 'center', width: '100%' }}>
+                                <ArrowDownCircle size={15} /> Plan From
+                            </button>
+                        </div>
                     </div>
 
                     {/* Effective From picker */}
@@ -247,21 +269,19 @@ export default function PlanBudget({ API_BASE, showMessage }) {
 
                     <div style={{ display: 'flex', flexDirection: 'column', gap: '0.15rem' }}>
                         <label style={{ fontSize: '0.65rem', color: 'transparent', paddingLeft: '0.2rem' }}>_</label>
-                        <button className="btn btn-ghost btn-sm" onClick={seedFromActuals} title="Copy this month's actual values into the plan column">
-                            <ArrowDownCircle size={15} /> Seed from actuals
-                        </button>
-                    </div>
-
-                    <div style={{ display: 'flex', flexDirection: 'column', gap: '0.15rem' }}>
-                        <label style={{ fontSize: '0.65rem', color: 'transparent', paddingLeft: '0.2rem' }}>_</label>
-                        <button
-                            className="btn btn-primary"
-                            onClick={savePlan}
-                            disabled={isSaving}
-                            style={{ position: 'relative' }}
-                        >
-                            {savedBadge ? <><Check size={15} /> Saved</> : <><Save size={15} /> Save Plan</>}
-                        </button>
+                        <div style={{ display: 'flex', gap: '0.5rem' }}>
+                            <button className="btn btn-ghost" onClick={() => setIsManagingPlans(true)} title="Manage saved plan versions">
+                                <Wallet size={18} />
+                            </button>
+                            <button
+                                className="btn btn-primary"
+                                onClick={savePlan}
+                                disabled={isSaving}
+                                style={{ position: 'relative' }}
+                            >
+                                {savedBadge ? <><Check size={15} /> Saved</> : <><Save size={15} /> Save Plan</>}
+                            </button>
+                        </div>
                     </div>
                 </div>
             </div>
@@ -297,7 +317,7 @@ export default function PlanBudget({ API_BASE, showMessage }) {
                 {/* ── Column 1: ACTUAL ── */}
                 <div className="glass-card" style={{ padding: '1.25rem' }}>
                     <h3 style={{ marginBottom: '1rem', fontSize: '0.95rem', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                        <span>Actual <span style={{ color: 'var(--text-muted)', fontWeight: 400 }}>— {monthLabel(actualMonth)}</span></span>
+                        <span>Comparison Month <span style={{ color: 'var(--text-muted)', fontWeight: 400 }}>— {monthLabel(actualMonth)}</span></span>
                         {activeFilter && (
                             <button className="btn btn-ghost btn-sm" style={{ fontSize: '0.7rem' }} onClick={() => setActiveFilter(null)}>
                                 Clear filter ✕
@@ -364,7 +384,7 @@ export default function PlanBudget({ API_BASE, showMessage }) {
                                 type="number"
                                 min="0"
                                 step="0.01"
-                                value={getPlan('income', cat) ?? getActualIncomeCat(cat)}
+                                value={getPlan('income', cat) ?? ''}
                                 onChange={e => updatePlanRow('income', cat, e.target.value)}
                                 style={{
                                     width: '110px', background: 'rgba(0,0,0,0.3)',
@@ -389,7 +409,7 @@ export default function PlanBudget({ API_BASE, showMessage }) {
                                     type="number"
                                     min="0"
                                     step="0.01"
-                                    value={getPlan('expense', cat) ?? getActualExpenseCat(cat)}
+                                    value={getPlan('expense', cat) ?? ''}
                                     onChange={e => updatePlanRow('expense', cat, e.target.value)}
                                     style={{
                                         width: '110px', background: 'rgba(0,0,0,0.3)',
@@ -424,7 +444,7 @@ export default function PlanBudget({ API_BASE, showMessage }) {
                     <SectionHeader icon={TrendingUp} label="Income" colorClass="text-income" />
                     {incomeCategories.map(cat => {
                         const actual = getActualIncomeCat(cat);
-                        const plan = getPlan('income', cat) ?? actual;
+                        const plan = Number(getPlan('income', cat)) || 0;
                         const delta = actual - plan;
                         return (
                             <div key={cat} style={{ display: 'grid', gridTemplateColumns: '1fr auto', alignItems: 'center', padding: '0.45rem 0.75rem', gap: '0.5rem' }}>
@@ -444,7 +464,7 @@ export default function PlanBudget({ API_BASE, showMessage }) {
                         <SectionHeader icon={BarChart3} label="Expenses" colorClass="text-expense" />
                         {expenseCategories.map(cat => {
                             const actual = getActualExpenseCat(cat);
-                            const plan = getPlan('expense', cat) ?? actual;
+                            const plan = Number(getPlan('expense', cat)) || 0;
                             const delta = actual - plan;
                             return (
                                 <div key={cat} style={{ display: 'grid', gridTemplateColumns: '1fr auto', alignItems: 'center', padding: '0.45rem 0.75rem', gap: '0.5rem' }}>
@@ -548,6 +568,80 @@ export default function PlanBudget({ API_BASE, showMessage }) {
                     {activeFilter ? ` in "${activeFilter}"` : ''}
                 </div>
             </div>
+
+            <AnimatePresence>
+                {isManagingPlans && (
+                    <div className="modal-overlay" onClick={() => setIsManagingPlans(false)}>
+                        <motion.div
+                            initial={{ opacity: 0, scale: 0.95 }}
+                            animate={{ opacity: 1, scale: 1 }}
+                            exit={{ opacity: 0, scale: 0.95 }}
+                            className="glass-card"
+                            onClick={e => e.stopPropagation()}
+                            style={{ width: '400px', maxWidth: '95vw', padding: '1.5rem' }}
+                        >
+                            <h2 style={{ marginBottom: '1.5rem', display: 'flex', alignItems: 'center', gap: '0.6rem', fontSize: '1.25rem' }}>
+                                <Wallet size={22} className="text-primary" /> Manage Plan Versions
+                            </h2>
+
+                            <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem', maxHeight: '60vh', overflowY: 'auto', paddingRight: '0.5rem' }}>
+                                {planVersions.length === 0 && (
+                                    <div style={{ textAlign: 'center', padding: '2rem', color: 'var(--text-muted)', fontSize: '0.9rem' }}>
+                                        No saved budget plans found.
+                                    </div>
+                                )}
+                                {planVersions.map(v => (
+                                    <div
+                                        key={v}
+                                        style={{
+                                            display: 'flex',
+                                            justifyContent: 'space-between',
+                                            alignItems: 'center',
+                                            padding: '0.75rem 1rem',
+                                            background: 'rgba(255,255,255,0.04)',
+                                            borderRadius: '0.6rem',
+                                            border: `1px solid ${v === planEffectiveDate ? 'rgba(99,102,241,0.3)' : 'var(--border)'}`,
+                                        }}
+                                    >
+                                        <div style={{ display: 'flex', flexDirection: 'column' }}>
+                                            <span style={{ fontWeight: 600, fontSize: '0.95rem', color: v === planEffectiveDate ? 'var(--primary)' : 'var(--text)' }}>
+                                                {monthLabel(v)}
+                                            </span>
+                                            {v === planEffectiveDate && (
+                                                <span style={{ fontSize: '0.7rem', color: 'var(--primary)', opacity: 0.8 }}>Currently Active</span>
+                                            )}
+                                        </div>
+                                        <div style={{ display: 'flex', gap: '0.4rem' }}>
+                                            <button
+                                                className="btn btn-ghost btn-sm"
+                                                onClick={() => { setEffectiveFrom(v); setIsManagingPlans(false); }}
+                                                title="Load this plan"
+                                            >
+                                                Load
+                                            </button>
+                                            <button
+                                                className="btn btn-ghost btn-sm text-expense"
+                                                onClick={() => deletePlan(v)}
+                                                title="Delete this plan version"
+                                            >
+                                                <Trash2 size={16} />
+                                            </button>
+                                        </div>
+                                    </div>
+                                ))}
+                            </div>
+
+                            <button
+                                className="btn btn-ghost"
+                                style={{ width: '100%', marginTop: '1.5rem', justifyContent: 'center' }}
+                                onClick={() => setIsManagingPlans(false)}
+                            >
+                                Close
+                            </button>
+                        </motion.div>
+                    </div>
+                )}
+            </AnimatePresence>
         </motion.div>
     );
 }

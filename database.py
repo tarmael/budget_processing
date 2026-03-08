@@ -447,6 +447,14 @@ def get_budget_plan_versions():
     conn.close()
     return versions
 
+def delete_budget_plan(effective_from):
+    """Delete all budget plan items for a given effective_from month."""
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    cursor.execute("DELETE FROM budget_plans WHERE effective_from = ?", (effective_from,))
+    conn.commit()
+    conn.close()
+
 def get_recurring_transactions():
     """
     Identify potential recurring transactions.

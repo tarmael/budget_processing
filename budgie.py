@@ -229,6 +229,11 @@ async def get_budget_plan_versions():
     """Return all distinct effective_from months that have saved plans."""
     return database.get_budget_plan_versions()
 
+@app.delete("/api/budget_plan/{month}")
+async def delete_budget_plan(month: str):
+    database.delete_budget_plan(month)
+    return {"status": "success"}
+
 
 if __name__ == "__main__":
     import uvicorn

@@ -13,6 +13,12 @@ A simple too budgeting tool for personal finance.
 
 See [HOWTO](HOWTO.md) for detailed instructions on how to use the application.
 
+## Why?
+
+Budgie was built with Agentic tools. It cost nothing to develop, therefore it cost nothing to share.
+
+Your transaction data is your own. You should own it, and you should be able to view it easily in order to make informed financial decisions. Other tools are costly, and are filled with unnecessary features.
+
 ## Getting Started
 
 ### Option 1: Running Locally
